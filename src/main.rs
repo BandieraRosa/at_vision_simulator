@@ -1,5 +1,7 @@
+mod handler;
 mod power_rune;
 mod util;
+
 use std::collections::HashSet;
 
 use avian3d::prelude::*;
@@ -15,7 +17,10 @@ use bevy::{
 
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 
-use crate::power_rune::{PowerRunePlugin, PowerRuneRoot, Projectile};
+use crate::{
+    handler::{on_activate, on_hit},
+    power_rune::{PowerRunePlugin, PowerRuneRoot, Projectile},
+};
 
 #[derive(Component)]
 struct MainCamera {
@@ -86,6 +91,8 @@ fn main() {
         .add_systems(Startup, setup)
         .add_observer(setup_vehicle)
         .add_observer(setup_collision)
+        .add_observer(on_hit)
+        .add_observer(on_activate)
         .add_systems(
             Update,
             (
@@ -311,7 +318,7 @@ fn projectile_launch(
             Transform::IDENTITY.with_translation(
                 gimbal.0.translation() + (gimbal.0.rotation() * launch_offset.0.translation),
             ),
-            AudioPlayer::new(asset_server.load("projectile_launch.ogg")),
+            //AudioPlayer::new(asset_server.load("projectile_launch.ogg")),
             Projectile,
         ));
     }
