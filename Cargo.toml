@@ -1,0 +1,12 @@
+[package]
+name = "bevy_robomaster_simulator"
+version = "0.1.0"
+edition = "2024"
+default-run = "bevy_robomaster_simulator"
+
+[dependencies]
+bevy = "0.17.2"
+avian3d = "0.4"
+bevy_gltf_animation = "0.3.0"
+bevy-inspector-egui = "=0.35.0"
+rand = "0.8"
