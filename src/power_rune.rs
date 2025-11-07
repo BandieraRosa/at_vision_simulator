@@ -772,6 +772,7 @@ fn handle_rune_collision(
     mut runes: Query<&mut PowerRune>,
     targets: Query<&RuneIndex>,
     projectiles: Query<(), With<Projectile>>,
+    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     let Ok(&RuneIndex(index, rune_ent)) = targets.get(event.collider2) else {
         return;
@@ -798,6 +799,13 @@ fn handle_rune_collision(
                 });
             }
             MechanismState::Activated { .. } => {
+                for rune in &mut rune.targets {
+                    for leg in &mut rune.visual.legging_segments {
+                        for leg in leg {
+                            leg.set(true, &mut materials);
+                        }
+                    }
+                }
                 commands.trigger(RuneActivated { rune: rune_ent });
             }
             MechanismState::Failed { .. } => {
