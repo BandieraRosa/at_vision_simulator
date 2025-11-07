@@ -7,12 +7,12 @@ use bevy::{
     },
 };
 
-use crate::power_rune::{EnergyHub, RuneActivated, RuneHit};
+use crate::power_rune::{PowerRune, RuneActivated, RuneHit};
 
 pub fn on_activate(
     ev: On<RuneActivated>,
     mut commands: Commands,
-    query: Query<&EnergyHub>,
+    query: Query<&PowerRune>,
     asset_server: Res<AssetServer>,
 ) {
     let Ok(_rune) = query.get(ev.rune) else {
@@ -24,7 +24,7 @@ pub fn on_activate(
 pub fn on_hit(
     ev: On<RuneHit>,
     mut commands: Commands,
-    query: Query<&EnergyHub>,
+    query: Query<&PowerRune>,
     asset_server: Res<AssetServer>,
 ) {
     let Ok(_rune) = query.get(ev.rune) else {

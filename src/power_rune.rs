@@ -236,7 +236,7 @@ impl RotationController {
 const 招笑: bool = true;
 
 #[derive(Component)]
-pub struct EnergyHub {
+pub struct PowerRune {
     _team: RuneTeam,
     mode: RuneMode,
     state: MechanismState,
@@ -249,7 +249,7 @@ pub struct HitResult {
     pub change_state: bool,
 }
 
-impl EnergyHub {
+impl PowerRune {
     fn new(team: RuneTeam, mode: RuneMode, targets: Vec<RuneData>, clockwise: bool) -> Self {
         Self {
             _team: team,
@@ -740,7 +740,7 @@ fn setup_power_rune(
             continue;
         }
 
-        commands.entity(face_entity).insert(EnergyHub::new(
+        commands.entity(face_entity).insert(PowerRune::new(
             if (index & 1) > 0 {
                 RuneTeam::Red
             } else {
@@ -769,40 +769,40 @@ pub struct RuneHit {
 fn handle_rune_collision(
     event: On<CollisionStart>,
     mut commands: Commands,
-    mut hubs: Query<&mut EnergyHub>,
+    mut runes: Query<&mut PowerRune>,
     targets: Query<&RuneIndex>,
     projectiles: Query<(), With<Projectile>>,
 ) {
-    let Ok(&RuneIndex(index, hub_ent)) = targets.get(event.collider2) else {
+    let Ok(&RuneIndex(index, rune_ent)) = targets.get(event.collider2) else {
         return;
     };
     let other = event.collider1;
     if !projectiles.contains(other) {
         return;
     }
-    if let Ok(mut hub) = hubs.get_mut(hub_ent) {
+    if let Ok(mut rune) = runes.get_mut(rune_ent) {
         let mut rng = rand::thread_rng();
-        let result = hub.on_target_hit(index, &mut rng);
+        let result = rune.on_target_hit(index, &mut rng);
 
-        match hub.state {
+        match rune.state {
             MechanismState::Inactive { .. } => {
                 commands.trigger(RuneHit {
-                    rune: hub_ent,
+                    rune: rune_ent,
                     result,
                 });
             }
             MechanismState::Activating(_) => {
                 commands.trigger(RuneHit {
-                    rune: hub_ent,
+                    rune: rune_ent,
                     result,
                 });
             }
             MechanismState::Activated { .. } => {
-                commands.trigger(RuneActivated { rune: hub_ent });
+                commands.trigger(RuneActivated { rune: rune_ent });
             }
             MechanismState::Failed { .. } => {
                 commands.trigger(RuneHit {
-                    rune: hub_ent,
+                    rune: rune_ent,
                     result,
                 });
             }
@@ -810,11 +810,11 @@ fn handle_rune_collision(
     }
 }
 
-fn rune_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
+fn rune_activation_tick(time: Res<Time>, mut runes: Query<&mut PowerRune>) {
     let delta = time.delta();
     let mut rng = rand::thread_rng();
-    for mut hub in &mut hubs {
-        let action = match &mut hub.state {
+    for mut rune in &mut runes {
+        let action = match &mut rune.state {
             MechanismState::Inactive { wait } => {
                 if wait.tick(delta).just_finished() {
                     Some(RuneAction::StartActivating)
@@ -857,29 +857,29 @@ fn rune_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
 
         if let Some(action) = action {
             match action {
-                RuneAction::StartActivating => hub.enter_activating(&mut rng),
+                RuneAction::StartActivating => rune.enter_activating(&mut rng),
                 RuneAction::NewRound => {
-                    if let Some(state) = hub.build_new_round(&mut rng) {
-                        hub.state = MechanismState::Activating(state);
+                    if let Some(state) = rune.build_new_round(&mut rng) {
+                        rune.state = MechanismState::Activating(state);
                     } else {
-                        hub.enter_activated();
+                        rune.enter_activated();
                     }
                 }
-                RuneAction::Failure => hub.enter_failed(),
-                RuneAction::ResetToInactive => hub.enter_inactive(),
+                RuneAction::Failure => rune.enter_failed(),
+                RuneAction::ResetToInactive => rune.enter_inactive(),
             }
         }
     }
 }
 
 fn rune_apply_visuals(
-    mut hubs: Query<&mut EnergyHub>,
+    mut runes: Query<&mut PowerRune>,
     mut visibilities: Query<&mut Visibility>,
     mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
-    for mut hub in &mut hubs {
-        let s = hub.mode.clone();
-        for target in &mut hub.targets {
+    for mut rune in &mut runes {
+        let s = rune.mode.clone();
+        for target in &mut rune.targets {
             if target.state != target.applied_state {
                 apply_target_visual(
                     &s,
@@ -894,16 +894,16 @@ fn rune_apply_visuals(
     }
 }
 
-fn rune_rotation_system(time: Res<Time>, mut hubs: Query<(&mut Transform, &mut EnergyHub)>) {
+fn rune_rotation_system(time: Res<Time>, mut runes: Query<(&mut Transform, &mut PowerRune)>) {
     let dt = time.delta_secs();
-    for (mut transform, mut hub) in &mut hubs {
-        let mode = hub.mode.clone();
+    for (mut transform, mut rune) in &mut runes {
+        let mode = rune.mode.clone();
         // 只有在激活状态下大机关才使用变量旋转
-        let speed = hub.rotation.current_speed(mode, dt);
+        let speed = rune.rotation.current_speed(mode, dt);
         let angle = speed * dt;
 
         // 确保旋转方向正确：红方顺时针(正角)，蓝方逆时针(负角)
-        transform.rotate_local_axis(hub.rotation.direction, angle);
+        transform.rotate_local_axis(rune.rotation.direction, angle);
     }
 }
 
