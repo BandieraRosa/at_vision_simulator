@@ -1,4 +1,4 @@
-use std::{collections::HashMap, f32::consts::PI};
+use std::collections::HashMap;
 
 use avian3d::prelude::{CollisionEventsEnabled, CollisionStart};
 use bevy::{
@@ -34,7 +34,7 @@ pub struct Projectile;
 #[derive(Component)]
 pub struct EnergyHubRoot;
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum HubAction {
     StartActivating,
     NewRound,
@@ -42,13 +42,13 @@ enum HubAction {
     ResetToInactive,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum EnergyTeam {
     Red,
     Blue,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum MechanismMode {
     Small,
     Large,
@@ -101,6 +101,7 @@ struct ActivatingState {
     hit_flags: Vec<bool>,
     window: ActivationWindow,
     timeout: Timer,
+    global_timeout: Timer, // 20秒全局激活超时
 }
 
 struct VariableRotation {
@@ -132,6 +133,8 @@ const LARGE_SECONDARY_TIMEOUT: f32 = 1.0;
 const INACTIVE_WAIT: f32 = 1.0;
 const FAILURE_RECOVER: f32 = 1.5;
 const ACTIVATED_HOLD: f32 = 6.0;
+const ACTIVATION_GLOBAL_TIMEOUT: f32 = 20.0; // 20秒全局激活超时
+const ROTATION_BASELINE_SMALL: f32 = std::f32::consts::PI / 3.0; // 小机关固定角速度
 
 impl EnergyMaterialCache {
     fn ensure_muted(
@@ -194,7 +197,7 @@ struct RotationController {
 impl RotationController {
     fn new(clockwise: bool) -> Self {
         Self {
-            baseline: PI / 3.0,
+            baseline: ROTATION_BASELINE_SMALL,
             direction: Dir3::from_xyz(-1.0, 0.0, -1.0).unwrap(),
             variable: None,
             clockwise,
@@ -203,6 +206,10 @@ impl RotationController {
 
     fn reset_variable(&mut self, rng: &mut impl Rng) {
         self.variable = Some(VariableRotation::random(rng));
+        // 确保重置时间参数
+        if let Some(ref mut variable) = self.variable {
+            variable.t = 0.0;
+        }
     }
 
     fn clear_variable(&mut self) {
@@ -214,6 +221,7 @@ impl RotationController {
         if mode == MechanismMode::Small {
             return sgn * self.baseline;
         }
+        // 大机关只有在激活状态下使用变量旋转
         if let Some(variable) = &mut self.variable {
             variable.advance(dt);
             return sgn * variable.speed();
@@ -290,14 +298,17 @@ impl EnergyHub {
             hit_flags: vec![false; count],
             window: ActivationWindow::Primary,
             timeout: Timer::from_seconds(ACTIVATION_PRIMARY_TIMEOUT, TimerMode::Once),
+            global_timeout: Timer::from_seconds(ACTIVATION_GLOBAL_TIMEOUT, TimerMode::Once), // 20秒全局激活超时
         })
     }
 
     fn enter_activating(&mut self, rng: &mut impl Rng) {
+        // 重新创建旋转控制器确保参数完全重置
+        self.rotation.clear_variable();
+
+        // 大机关激活时使用变量旋转，小机关使用固定速度
         if self.mode == MechanismMode::Large {
             self.rotation.reset_variable(rng);
-        } else {
-            self.rotation.clear_variable();
         }
         if let Some(state) = self.build_new_round(rng) {
             self.state = MechanismState::Activating(state);
@@ -316,7 +327,6 @@ impl EnergyHub {
 
     fn enter_failed(&mut self) {
         self.reset_all_targets(TargetState::Inactive);
-        self.rotation.clear_variable();
         self.state = MechanismState::Failed {
             wait: Timer::from_seconds(FAILURE_RECOVER, TimerMode::Once),
         };
@@ -324,6 +334,8 @@ impl EnergyHub {
 
     fn enter_activated(&mut self) {
         self.reset_all_targets(TargetState::Completed);
+        // 激活状态下停止旋转
+        self.rotation.clear_variable();
         self.state = MechanismState::Activated {
             wait: Timer::from_seconds(ACTIVATED_HOLD, TimerMode::Once),
         };
@@ -375,22 +387,39 @@ impl EnergyHub {
                         }
                         MechanismMode::Large => {
                             let hits = state.hit_flags.iter().filter(|&&flag| flag).count();
-                            let requires_second =
-                                state.highlighted.len() > 1 && hits < state.highlighted.len();
-                            if requires_second {
+
+                            // 大机关逻辑：规则要求命中任意一个靶后启动1秒二次窗口
+                            if hits == 1 && state.window == ActivationWindow::Primary {
+                                // 命中第一个靶后启动1秒二次命中窗口
                                 state.window = ActivationWindow::Secondary;
                                 state.timeout =
                                     Timer::from_seconds(LARGE_SECONDARY_TIMEOUT, TimerMode::Once);
                                 self.state = MechanismState::Activating(state);
-                            } else if let Some(next) = self.build_new_round(rng) {
-                                self.state = MechanismState::Activating(next);
+                            } else if hits == state.highlighted.len() {
+                                // 成功命中所有点亮靶，进入下一轮
+                                if let Some(next) = self.build_new_round(rng) {
+                                    self.state = MechanismState::Activating(next);
+                                } else {
+                                    self.enter_activated();
+                                }
+                            } else if state.window == ActivationWindow::Secondary
+                                && hits < state.highlighted.len()
+                            {
+                                // 在二次窗口内只命中一个靶，保持状态等待二次命中
+                                self.state = MechanismState::Activating(state);
                             } else {
-                                self.enter_activated();
+                                // 处理边界情况：如果二次窗口超时后仍未命中第二个靶，进入下一轮
+                                if let Some(next) = self.build_new_round(rng) {
+                                    self.state = MechanismState::Activating(next);
+                                } else {
+                                    self.enter_activated();
+                                }
                             }
                         }
                     }
                     true
                 } else {
+                    // 击中非点亮模块，触发激活失败
                     self.enter_failed();
                     true
                 }
@@ -500,29 +529,42 @@ fn apply_target_visual(
             for swap in &mut visual.progress_segments {
                 swap.set(true, materials);
             }
+            // 高亮状态：关闭所有灯效，只显示进度灯效
+            for level_swaps in &mut visual.legging_segments {
+                for swap in level_swaps {
+                    swap.set(false, materials);
+                }
+            }
         }
         TargetState::Completed => {
             set_visibility_if_present(visual.active, Visibility::Visible, visibilities);
             set_visibility_if_present(visual.disabled, Visibility::Hidden, visibilities);
-            match *mode {
-                MechanismMode::Small => {
-                    for swap in &mut visual.legging_segments {
-                        for swap in swap {
-                            swap.set(true, materials);
-                        }
-                    }
-                }
-                MechanismMode::Large => {
-                    for swap in &mut visual.legging_segments[0] {
-                        swap.set(true, materials);
-                    }
-                }
-            };
+
+            // 根据模式设置灯效：小机关全亮，大机关亮第1级
             for swap in &mut visual.padding_segments {
                 swap.set(true, materials);
             }
             for swap in &mut visual.progress_segments {
                 swap.set(false, materials);
+            }
+
+            match *mode {
+                MechanismMode::Small => {
+                    // 小机关：完成时所有灯臂全亮 LEGGING_1,2,3
+                    for level_swaps in &mut visual.legging_segments {
+                        for swap in level_swaps {
+                            swap.set(true, materials);
+                        }
+                    }
+                }
+                MechanismMode::Large => {
+                    // 大机关：完成时仅亮第1级灯效 LEGGING_1
+                    if let Some(first_level) = visual.legging_segments.get_mut(0) {
+                        for swap in first_level {
+                            swap.set(true, materials);
+                        }
+                    }
+                }
             }
         }
     }
@@ -665,6 +707,7 @@ fn setup_energy(
         } else {
             MechanismMode::Small
         };
+        println!("{}", mode);
 
         let targets = build_targets(
             index,
@@ -729,14 +772,21 @@ fn energy_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
                 }
             }
             MechanismState::Activating(state) => {
-                if state.timeout.tick(delta).just_finished() {
-                    match state.window {
-                        ActivationWindow::Primary => Some(HubAction::Failure),
-                        ActivationWindow::Secondary => Some(HubAction::NewRound),
-                    }
-                } else {
-                    None
+                let mut action = None;
+
+                // 检查20秒全局激活超时（最高优先级）
+                if state.global_timeout.tick(delta).just_finished() {
+                    action = Some(HubAction::Failure); // 20秒全局超时激活失败
                 }
+                // 否则检查激活窗口超时
+                else if state.timeout.tick(delta).just_finished() {
+                    action = match state.window {
+                        ActivationWindow::Primary => Some(HubAction::Failure), // 2.5秒超时激活失败
+                        ActivationWindow::Secondary => Some(HubAction::NewRound), // 1秒窗口过期进入下一轮
+                    };
+                }
+
+                action
             }
             MechanismState::Activated { wait } => {
                 if wait.tick(delta).just_finished() {
@@ -790,11 +840,6 @@ fn energy_apply_visuals(
                 target.applied_state = target.state.clone();
             }
         }
-        /*
-        let shared_on = matches!(hub.state, MechanismState::Activated { .. });
-        for segment in &mut hub.shared_segments {
-            segment.set(shared_on, &mut materials);
-        }*/
     }
 }
 
@@ -802,10 +847,11 @@ fn energy_rotation_system(time: Res<Time>, mut hubs: Query<(&mut Transform, &mut
     let dt = time.delta_secs();
     for (mut transform, mut hub) in &mut hubs {
         let mode = hub.mode.clone();
-        let activating = matches!(hub.state, MechanismState::Activating(_));
+        // 只有在激活状态下大机关才使用变量旋转
         let speed = hub.rotation.current_speed(mode, dt);
         let angle = speed * dt;
 
+        // 确保旋转方向正确：红方顺时针(正角)，蓝方逆时针(负角)
         transform.rotate_local_axis(hub.rotation.direction, angle);
     }
 }
