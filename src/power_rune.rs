@@ -239,6 +239,8 @@ const 招笑: bool = true;
 pub struct PowerRune {
     _team: RuneTeam,
     mode: RuneMode,
+    r_powered: Entity,
+    r_unpowered: Entity,
     state: MechanismState,
     targets: Vec<RuneData>,
     rotation: RotationController,
@@ -250,10 +252,19 @@ pub struct HitResult {
 }
 
 impl PowerRune {
-    fn new(team: RuneTeam, mode: RuneMode, targets: Vec<RuneData>, clockwise: bool) -> Self {
+    fn new(
+        team: RuneTeam,
+        mode: RuneMode,
+        r_powered: Entity,
+        r_unpowered: Entity,
+        targets: Vec<RuneData>,
+        clockwise: bool,
+    ) -> Self {
         Self {
             _team: team,
             mode,
+            r_powered,
+            r_unpowered,
             state: MechanismState::Inactive {
                 wait: Timer::from_seconds(INACTIVE_WAIT, TimerMode::Once),
             },
@@ -444,6 +455,19 @@ impl PowerRune {
                 change_state: false,
             },
         }
+    }
+
+    fn apply_shared_visual(&mut self, visibilities: &mut Query<&mut Visibility>) {
+        match &self.state {
+            MechanismState::Inactive { .. } => {
+                set_visibility_if_present(self.r_powered, Visibility::Hidden, visibilities);
+                set_visibility_if_present(self.r_unpowered, Visibility::Visible, visibilities);
+            }
+            _ => {
+                set_visibility_if_present(self.r_powered, Visibility::Visible, visibilities);
+                set_visibility_if_present(self.r_unpowered, Visibility::Hidden, visibilities);
+            }
+        };
     }
 }
 
@@ -747,6 +771,12 @@ fn setup_power_rune(
                 RuneTeam::Blue
             },
             mode,
+            *name_map
+                .get(&format!("FACE_{}_R_POWERED", index).to_string())
+                .unwrap(),
+            *name_map
+                .get(&format!("FACE_{}_R_UNPOWERED", index).to_string())
+                .unwrap(),
             targets,
             (index & 1) > 0,
         ));
@@ -886,6 +916,7 @@ fn rune_apply_visuals(
     mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     for mut rune in &mut runes {
+        rune.apply_shared_visual(&mut visibilities);
         let s = rune.mode.clone();
         for target in &mut rune.targets {
             if target.state != target.applied_state {
