@@ -372,7 +372,6 @@ impl PowerRune {
                     .position(|&idx| idx == target_index)
                 else {
                     if !招笑 {
-                        println!("招笑");
                         // 击中非点亮模块，触发激活失败
                         self.enter_failed();
                     }
@@ -396,7 +395,6 @@ impl PowerRune {
                     .iter()
                     .all(|target| matches!(target.state, RuneState::Completed))
                 {
-                    println!("activated");
                     self.enter_activated();
                     return HitResult {
                         accurate: true,
@@ -746,7 +744,6 @@ fn setup_power_rune(
         } else {
             RuneMode::Small
         };
-        println!("{:?}", mode);
 
         let targets = build_targets(
             index,
@@ -836,7 +833,14 @@ fn handle_rune_collision(
                         }
                     }
                 }
-                commands.trigger(RuneActivated { rune: rune_ent });
+                if result.change_state {
+                    commands.trigger(RuneActivated { rune: rune_ent });
+                } else {
+                    commands.trigger(RuneHit {
+                        rune: rune_ent,
+                        result,
+                    });
+                }
             }
             MechanismState::Failed { .. } => {
                 commands.trigger(RuneHit {
