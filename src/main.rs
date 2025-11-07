@@ -1,7 +1,7 @@
 mod handler;
 mod power_rune;
+mod statistic;
 mod util;
-
 use std::collections::HashSet;
 
 use avian3d::prelude::*;
@@ -20,6 +20,7 @@ use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 use crate::{
     handler::{on_activate, on_hit},
     power_rune::{PowerRunePlugin, PowerRuneRoot, Projectile},
+    statistic::{accurate_count, accurate_pct, increase_launch, launch_count},
 };
 
 #[derive(Component)]
@@ -76,12 +77,40 @@ struct DisplayOnly;
 #[derive(Resource)]
 struct Cooldown(Timer);
 
+/// Creates help text at the bottom of the screen.
+fn create_help_text() -> Text {
+    format!(
+        "total={} accurate={} pct={}",
+        launch_count(),
+        accurate_count(),
+        accurate_pct()
+    )
+    .into()
+}
+
+/// Spawns the help text at the bottom of the screen.
+fn spawn_text(commands: &mut Commands) {
+    commands.spawn((
+        create_help_text(),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(12),
+            left: px(12),
+            ..default()
+        },
+    ));
+}
+
+fn update_help_text(mut text: Query<&mut Text>) {
+    for mut text in text.iter_mut() {
+        *text = create_help_text();
+    }
+}
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(PhysicsPlugins::default())
-        .add_plugins(EguiPlugin::default())
-        .add_plugins(WorldInspectorPlugin::new())
+        .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        .add_plugins((EguiPlugin::default(), WorldInspectorPlugin::new()))
         //.add_plugins(PhysicsDebugPlugin::default())
         .add_plugins(PowerRunePlugin)
         .insert_resource(CameraMode(FollowingType::Robot))
@@ -96,6 +125,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                update_help_text,
                 following_controls,
                 vehicle_controls,
                 gimbal_controls,
@@ -108,6 +138,7 @@ fn main() {
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    spawn_text(&mut commands);
     commands.spawn((
         DirectionalLight {
             color: Color::srgb(0.9, 0.95, 1.0),
@@ -285,6 +316,7 @@ fn projectile_launch(
     }
     cooldown.0.reset();
     if keyboard.pressed(KeyCode::KeyG) {
+        increase_launch();
         let direction = (gimbal.0.rotation() * launch_offset.0.rotation)
             .mul_vec3(Vec3::Y)
             .normalize_or_zero();
