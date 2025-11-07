@@ -32,10 +32,10 @@ use crate::util::{collect_entities_by, insert_recursively};
 pub struct Projectile;
 
 #[derive(Component)]
-pub struct EnergyHubRoot;
+pub struct PowerRuneRoot;
 
 #[derive(Debug, PartialEq, Eq)]
-enum HubAction {
+enum RuneAction {
     StartActivating,
     NewRound,
     Failure,
@@ -43,13 +43,13 @@ enum HubAction {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum EnergyTeam {
+enum RuneTeam {
     Red,
     Blue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum MechanismMode {
+enum RuneMode {
     Small,
     Large,
 }
@@ -62,7 +62,7 @@ enum MechanismState {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-enum TargetState {
+enum RuneState {
     Inactive,
     Highlighted,
     Completed,
@@ -75,20 +75,20 @@ enum ActivationWindow {
 }
 
 #[derive(Component)]
-struct TargetIndex(usize, Entity);
+struct RuneIndex(usize, Entity);
 
 #[derive(Resource, Default)]
-struct EnergyMaterialCache {
+struct RuneMaterialCache {
     muted: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
 }
 
-struct TargetData {
-    visual: TargetVisual,
-    state: TargetState,
-    applied_state: TargetState,
+struct RuneData {
+    visual: RuneVisual,
+    state: RuneState,
+    applied_state: RuneState,
 }
 
-struct TargetVisual {
+struct RuneVisual {
     active: Entity,
     disabled: Entity,
     legging_segments: [Vec<ApperanceController>; 3],
@@ -136,7 +136,7 @@ const ACTIVATED_HOLD: f32 = 6.0;
 const ACTIVATION_GLOBAL_TIMEOUT: f32 = 20.0; // 20秒全局激活超时
 const ROTATION_BASELINE_SMALL: f32 = std::f32::consts::PI / 3.0; // 小机关固定角速度
 
-impl EnergyMaterialCache {
+impl RuneMaterialCache {
     fn ensure_muted(
         &mut self,
         handle: &Handle<StandardMaterial>,
@@ -216,9 +216,9 @@ impl RotationController {
         self.variable = None;
     }
 
-    fn current_speed(&mut self, mode: MechanismMode, dt: f32) -> f32 {
+    fn current_speed(&mut self, mode: RuneMode, dt: f32) -> f32 {
         let sgn = if self.clockwise { 1.0 } else { -1.0 };
-        if mode == MechanismMode::Small {
+        if mode == RuneMode::Small {
             return sgn * self.baseline;
         }
         // 大机关只有在激活状态下使用变量旋转
@@ -232,20 +232,15 @@ impl RotationController {
 
 #[derive(Component)]
 struct EnergyHub {
-    _team: EnergyTeam,
-    mode: MechanismMode,
+    _team: RuneTeam,
+    mode: RuneMode,
     state: MechanismState,
-    targets: Vec<TargetData>,
+    targets: Vec<RuneData>,
     rotation: RotationController,
 }
 
 impl EnergyHub {
-    fn new(
-        team: EnergyTeam,
-        mode: MechanismMode,
-        targets: Vec<TargetData>,
-        clockwise: bool,
-    ) -> Self {
+    fn new(team: RuneTeam, mode: RuneMode, targets: Vec<RuneData>, clockwise: bool) -> Self {
         Self {
             _team: team,
             mode,
@@ -262,7 +257,7 @@ impl EnergyHub {
             .iter()
             .enumerate()
             .filter_map(|(idx, target)| {
-                if matches!(target.state, TargetState::Completed) {
+                if matches!(target.state, RuneState::Completed) {
                     None
                 } else {
                     Some(idx)
@@ -278,19 +273,19 @@ impl EnergyHub {
         }
         available.shuffle(rng);
         let required = match self.mode {
-            MechanismMode::Small => 1,
-            MechanismMode::Large => 2,
+            RuneMode::Small => 1,
+            RuneMode::Large => 2,
         };
         let count = required.min(available.len());
         let selection: Vec<usize> = available.into_iter().take(count).collect();
 
         for target in &mut self.targets {
-            if !matches!(target.state, TargetState::Completed) {
-                target.state = TargetState::Inactive;
+            if !matches!(target.state, RuneState::Completed) {
+                target.state = RuneState::Inactive;
             }
         }
         for &idx in &selection {
-            self.targets[idx].state = TargetState::Highlighted;
+            self.targets[idx].state = RuneState::Highlighted;
         }
 
         Some(ActivatingState {
@@ -307,7 +302,7 @@ impl EnergyHub {
         self.rotation.clear_variable();
 
         // 大机关激活时使用变量旋转，小机关使用固定速度
-        if self.mode == MechanismMode::Large {
+        if self.mode == RuneMode::Large {
             self.rotation.reset_variable(rng);
         }
         if let Some(state) = self.build_new_round(rng) {
@@ -318,7 +313,7 @@ impl EnergyHub {
     }
 
     fn enter_inactive(&mut self) {
-        self.reset_all_targets(TargetState::Inactive);
+        self.reset_all_targets(RuneState::Inactive);
         self.rotation.clear_variable();
         self.state = MechanismState::Inactive {
             wait: Timer::from_seconds(INACTIVE_WAIT, TimerMode::Once),
@@ -326,14 +321,14 @@ impl EnergyHub {
     }
 
     fn enter_failed(&mut self) {
-        self.reset_all_targets(TargetState::Inactive);
+        self.reset_all_targets(RuneState::Inactive);
         self.state = MechanismState::Failed {
             wait: Timer::from_seconds(FAILURE_RECOVER, TimerMode::Once),
         };
     }
 
     fn enter_activated(&mut self) {
-        self.reset_all_targets(TargetState::Completed);
+        self.reset_all_targets(RuneState::Completed);
         // 激活状态下停止旋转
         self.rotation.clear_variable();
         self.state = MechanismState::Activated {
@@ -341,7 +336,7 @@ impl EnergyHub {
         };
     }
 
-    fn reset_all_targets(&mut self, state: TargetState) {
+    fn reset_all_targets(&mut self, state: RuneState) {
         for target in &mut self.targets {
             target.state = state.clone();
         }
@@ -365,12 +360,12 @@ impl EnergyHub {
                         return false;
                     }
                     state.hit_flags[pos] = true;
-                    self.targets[target_index].state = TargetState::Completed;
+                    self.targets[target_index].state = RuneState::Completed;
 
                     if self
                         .targets
                         .iter()
-                        .all(|target| matches!(target.state, TargetState::Completed))
+                        .all(|target| matches!(target.state, RuneState::Completed))
                     {
                         println!("activated");
                         self.enter_activated();
@@ -378,14 +373,14 @@ impl EnergyHub {
                     }
 
                     match self.mode {
-                        MechanismMode::Small => {
+                        RuneMode::Small => {
                             if let Some(next) = self.build_new_round(rng) {
                                 self.state = MechanismState::Activating(next);
                             } else {
                                 self.enter_activated();
                             }
                         }
-                        MechanismMode::Large => {
+                        RuneMode::Large => {
                             let hits = state.hit_flags.iter().filter(|&&flag| flag).count();
 
                             // 大机关逻辑：规则要求命中任意一个靶后启动1秒二次窗口
@@ -436,7 +431,7 @@ fn collect_material_swaps_recursive(
     entity: Entity,
     mesh_materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
-    cache: &mut EnergyMaterialCache,
+    cache: &mut RuneMaterialCache,
     query: &Query<&Children>,
     swaps: &mut Vec<MaterialSwap>,
 ) {
@@ -465,7 +460,7 @@ fn create_material_swaps(
     entities: Vec<Entity>,
     mesh_materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
-    cache: &mut EnergyMaterialCache,
+    cache: &mut RuneMaterialCache,
     children: &Query<&Children>,
 ) -> Vec<ApperanceController> {
     let mut controllers = Vec::new();
@@ -498,14 +493,14 @@ fn set_visibility_if_present(
 }
 
 fn apply_target_visual(
-    mode: &MechanismMode,
-    visual: &mut TargetVisual,
-    state: &TargetState,
+    mode: &RuneMode,
+    visual: &mut RuneVisual,
+    state: &RuneState,
     visibilities: &mut Query<&mut Visibility>,
     materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     match state {
-        TargetState::Inactive => {
+        RuneState::Inactive => {
             set_visibility_if_present(visual.active, Visibility::Hidden, visibilities);
             set_visibility_if_present(visual.disabled, Visibility::Visible, visibilities);
             for swap in &mut visual.legging_segments {
@@ -520,7 +515,7 @@ fn apply_target_visual(
                 swap.set(false, materials);
             }
         }
-        TargetState::Highlighted => {
+        RuneState::Highlighted => {
             set_visibility_if_present(visual.active, Visibility::Visible, visibilities);
             set_visibility_if_present(visual.disabled, Visibility::Hidden, visibilities);
             for swap in &mut visual.padding_segments {
@@ -536,7 +531,7 @@ fn apply_target_visual(
                 }
             }
         }
-        TargetState::Completed => {
+        RuneState::Completed => {
             set_visibility_if_present(visual.active, Visibility::Visible, visibilities);
             set_visibility_if_present(visual.disabled, Visibility::Hidden, visibilities);
 
@@ -549,7 +544,7 @@ fn apply_target_visual(
             }
 
             match *mode {
-                MechanismMode::Small => {
+                RuneMode::Small => {
                     // 小机关：完成时所有灯臂全亮 LEGGING_1,2,3
                     for level_swaps in &mut visual.legging_segments {
                         for swap in level_swaps {
@@ -557,7 +552,7 @@ fn apply_target_visual(
                         }
                     }
                 }
-                MechanismMode::Large => {
+                RuneMode::Large => {
                     // 大机关：完成时仅亮第1级灯效 LEGGING_1
                     if let Some(first_level) = visual.legging_segments.get_mut(0) {
                         for swap in first_level {
@@ -578,9 +573,9 @@ fn build_targets(
     visibilities: &mut Query<&mut Visibility>,
     mesh_materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
-    cache: &mut EnergyMaterialCache,
+    cache: &mut RuneMaterialCache,
     children: &Query<&Children>,
-) -> Vec<TargetData> {
+) -> Vec<RuneData> {
     let mut targets = Vec::new();
     for target_idx in 1..=5 {
         let prefix = format!("FACE_{}_TARGET_{}", face_index, target_idx);
@@ -623,7 +618,7 @@ fn build_targets(
         let logical_index = targets.len();
         insert_recursively(commands, collision_entity, children, &|| {
             (
-                TargetIndex(logical_index, face_entity),
+                RuneIndex(logical_index, face_entity),
                 CollisionEventsEnabled,
             )
         });
@@ -642,31 +637,31 @@ fn build_targets(
             )
         }
 
-        targets.push(TargetData {
-            visual: TargetVisual {
+        targets.push(RuneData {
+            visual: RuneVisual {
                 active,
                 disabled,
                 legging_segments,
                 padding_segments,
                 progress_segments,
             },
-            state: TargetState::Inactive,
-            applied_state: TargetState::Inactive,
+            state: RuneState::Inactive,
+            applied_state: RuneState::Inactive,
         });
     }
     targets
 }
 
-fn setup_energy(
+fn setup_power_rune(
     events: On<SceneInstanceReady>,
     mut commands: Commands,
-    power_query: Query<(), With<EnergyHubRoot>>,
+    power_query: Query<(), With<PowerRuneRoot>>,
     scene_spawner: Res<SceneSpawner>,
     names: Query<&Name>,
     mut visibilities: Query<&mut Visibility>,
     mut mesh_materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut cache: ResMut<EnergyMaterialCache>,
+    mut cache: ResMut<RuneMaterialCache>,
     children: Query<&Children>,
 ) {
     if !power_query.contains(events.entity) {
@@ -703,11 +698,11 @@ fn setup_energy(
 
     for (index, face_entity) in faces {
         let mode = if index & 2 > 0 {
-            MechanismMode::Large
+            RuneMode::Large
         } else {
-            MechanismMode::Small
+            RuneMode::Small
         };
-        println!("{}", mode);
+        println!("{:?}", mode);
 
         let targets = build_targets(
             index,
@@ -727,9 +722,9 @@ fn setup_energy(
 
         commands.entity(face_entity).insert(EnergyHub::new(
             if (index & 1) > 0 {
-                EnergyTeam::Red
+                RuneTeam::Red
             } else {
-                EnergyTeam::Blue
+                RuneTeam::Blue
             },
             mode,
             targets,
@@ -738,13 +733,13 @@ fn setup_energy(
     }
 }
 
-fn handle_energy_collision(
+fn handle_rune_collision(
     event: On<CollisionStart>,
     mut hubs: Query<&mut EnergyHub>,
-    targets: Query<&TargetIndex>,
+    targets: Query<&RuneIndex>,
     projectiles: Query<(), With<Projectile>>,
 ) {
-    let Ok(&TargetIndex(index, hub)) = targets.get(event.collider2) else {
+    let Ok(&RuneIndex(index, hub)) = targets.get(event.collider2) else {
         return;
     };
     let other = event.collider1;
@@ -759,14 +754,14 @@ fn handle_energy_collision(
     }
 }
 
-fn energy_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
+fn rune_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
     let delta = time.delta();
     let mut rng = rand::thread_rng();
     for mut hub in &mut hubs {
         let action = match &mut hub.state {
             MechanismState::Inactive { wait } => {
                 if wait.tick(delta).just_finished() {
-                    Some(HubAction::StartActivating)
+                    Some(RuneAction::StartActivating)
                 } else {
                     None
                 }
@@ -776,13 +771,13 @@ fn energy_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
 
                 // 检查20秒全局激活超时（最高优先级）
                 if state.global_timeout.tick(delta).just_finished() {
-                    action = Some(HubAction::Failure); // 20秒全局超时激活失败
+                    action = Some(RuneAction::Failure); // 20秒全局超时激活失败
                 }
                 // 否则检查激活窗口超时
                 else if state.timeout.tick(delta).just_finished() {
                     action = match state.window {
-                        ActivationWindow::Primary => Some(HubAction::Failure), // 2.5秒超时激活失败
-                        ActivationWindow::Secondary => Some(HubAction::NewRound), // 1秒窗口过期进入下一轮
+                        ActivationWindow::Primary => Some(RuneAction::Failure), // 2.5秒超时激活失败
+                        ActivationWindow::Secondary => Some(RuneAction::NewRound), // 1秒窗口过期进入下一轮
                     };
                 }
 
@@ -790,14 +785,14 @@ fn energy_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
             }
             MechanismState::Activated { wait } => {
                 if wait.tick(delta).just_finished() {
-                    Some(HubAction::ResetToInactive)
+                    Some(RuneAction::ResetToInactive)
                 } else {
                     None
                 }
             }
             MechanismState::Failed { wait } => {
                 if wait.tick(delta).just_finished() {
-                    Some(HubAction::ResetToInactive)
+                    Some(RuneAction::ResetToInactive)
                 } else {
                     None
                 }
@@ -806,22 +801,22 @@ fn energy_activation_tick(time: Res<Time>, mut hubs: Query<&mut EnergyHub>) {
 
         if let Some(action) = action {
             match action {
-                HubAction::StartActivating => hub.enter_activating(&mut rng),
-                HubAction::NewRound => {
+                RuneAction::StartActivating => hub.enter_activating(&mut rng),
+                RuneAction::NewRound => {
                     if let Some(state) = hub.build_new_round(&mut rng) {
                         hub.state = MechanismState::Activating(state);
                     } else {
                         hub.enter_activated();
                     }
                 }
-                HubAction::Failure => hub.enter_failed(),
-                HubAction::ResetToInactive => hub.enter_inactive(),
+                RuneAction::Failure => hub.enter_failed(),
+                RuneAction::ResetToInactive => hub.enter_inactive(),
             }
         }
     }
 }
 
-fn energy_apply_visuals(
+fn rune_apply_visuals(
     mut hubs: Query<&mut EnergyHub>,
     mut visibilities: Query<&mut Visibility>,
     mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
@@ -843,7 +838,7 @@ fn energy_apply_visuals(
     }
 }
 
-fn energy_rotation_system(time: Res<Time>, mut hubs: Query<(&mut Transform, &mut EnergyHub)>) {
+fn rune_rotation_system(time: Res<Time>, mut hubs: Query<(&mut Transform, &mut EnergyHub)>) {
     let dt = time.delta_secs();
     for (mut transform, mut hub) in &mut hubs {
         let mode = hub.mode.clone();
@@ -856,19 +851,19 @@ fn energy_rotation_system(time: Res<Time>, mut hubs: Query<(&mut Transform, &mut
     }
 }
 
-pub struct EnergyHubPlugin;
+pub struct PowerRunePlugin;
 
-impl bevy::app::Plugin for EnergyHubPlugin {
+impl bevy::app::Plugin for PowerRunePlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.init_resource::<EnergyMaterialCache>()
-            .add_observer(handle_energy_collision)
-            .add_observer(setup_energy)
+        app.init_resource::<RuneMaterialCache>()
+            .add_observer(handle_rune_collision)
+            .add_observer(setup_power_rune)
             .add_systems(
                 Update,
                 (
-                    energy_activation_tick,
-                    energy_apply_visuals,
-                    energy_rotation_system,
+                    rune_activation_tick,
+                    rune_apply_visuals,
+                    rune_rotation_system,
                 ),
             );
     }

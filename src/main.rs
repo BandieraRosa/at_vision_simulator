@@ -1,4 +1,4 @@
-mod energy_hub;
+mod power_rune;
 mod util;
 use std::collections::HashSet;
 
@@ -15,7 +15,7 @@ use bevy::{
 
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 
-use crate::energy_hub::{EnergyHubPlugin, EnergyHubRoot, Projectile};
+use crate::power_rune::{PowerRunePlugin, PowerRuneRoot, Projectile};
 
 #[derive(Component)]
 struct MainCamera {
@@ -78,7 +78,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
         //.add_plugins(PhysicsDebugPlugin::default())
-        .add_plugins(EnergyHubPlugin)
+        .add_plugins(PowerRunePlugin)
         .insert_resource(CameraMode(FollowingType::Robot))
         .insert_resource(Gravity(Vec3::NEG_Y * 9.81))
         .insert_resource(SubstepCount(20))
@@ -151,7 +151,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ),
         SceneRoot(asset_server.load("POWER.glb#Scene0")),
         Transform::IDENTITY,
-        EnergyHubRoot,
+        PowerRuneRoot,
     ));
 
     commands.spawn((
