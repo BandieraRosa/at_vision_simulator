@@ -1,43 +1,45 @@
 use std::collections::HashMap;
 
-use bevy::ecs::{
-    bundle::Bundle,
-    entity::Entity,
-    hierarchy::Children,
-    system::{Commands, Query},
+use bevy::{
+    camera::visibility::Visibility,
+    ecs::{
+        bundle::Bundle,
+        entity::Entity,
+        hierarchy::Children,
+        system::{Commands, Query},
+    },
 };
 
-pub fn collect_entities_by<F>(name_map: &HashMap<String, Entity>, mut predicate: F) -> Vec<Entity>
-where
-    F: FnMut(&str) -> bool,
-{
-    let mut entries: Vec<_> = name_map
-        .iter()
-        .filter_map(|(name, &entity)| {
-            if predicate(name) {
-                Some((name.clone(), entity))
-            } else {
-                None
-            }
-        })
+pub fn extract_entities_by<T, F: Fn(&T) -> bool>(
+    name_map: &mut HashMap<T, Entity>,
+    predicate: F,
+) -> Vec<Entity> {
+    return name_map
+        .extract_if(|k, _v| predicate(k))
+        .map(|v| v.1)
         .collect();
-    entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-    entries.into_iter().map(|(_, entity)| entity).collect()
 }
 
-pub fn insert_recursively<F, B>(
+pub fn insert_recursively<B: Bundle + Clone>(
     commands: &mut Commands,
     root: Entity,
     query: &Query<&Children>,
-    bundle: &F,
-) where
-    F: Fn() -> B,
-    B: Bundle,
-{
-    commands.entity(root).insert(bundle());
+    bundle: B,
+) {
     if let Ok(children) = query.get(root) {
         for child in children {
-            insert_recursively(commands, *child, query, bundle);
+            insert_recursively(commands, *child, query, bundle.clone());
         }
+    }
+    commands.entity(root).insert(bundle);
+}
+
+pub fn set_visibility_if_present(
+    entity: Entity,
+    value: Visibility,
+    visibilities: &mut Query<&mut Visibility>,
+) {
+    if let Ok(mut visibility) = visibilities.get_mut(entity) {
+        *visibility = value;
     }
 }

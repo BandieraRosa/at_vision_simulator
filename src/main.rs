@@ -2,9 +2,10 @@ mod handler;
 mod power_rune;
 mod statistic;
 mod util;
+mod visibility;
 use std::collections::HashSet;
 
-use avian3d::{math::PI, prelude::*};
+use avian3d::prelude::*;
 use bevy::{
     anti_alias::fxaa::Fxaa,
     core_pipeline::tonemapping::Tonemapping,
@@ -305,7 +306,7 @@ fn setup_vehicle(
 
 fn projectile_launch(
     time: Res<Time>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,

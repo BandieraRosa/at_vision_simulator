@@ -4,7 +4,6 @@ use avian3d::prelude::{CollisionEventsEnabled, CollisionStart};
 use bevy::{
     app::Update,
     asset::{AssetId, Assets, Handle},
-    camera::visibility::Visibility,
     color::LinearRgba,
     ecs::{
         component::Component,
@@ -15,10 +14,10 @@ use bevy::{
         observer::On,
         query::With,
         resource::Resource,
-        system::{Commands, Query, Res, ResMut},
+        system::{Commands, Query, Res, ResMut, SystemParam},
     },
     math::Dir3,
-    pbr::{MeshMaterial3d, StandardMaterial},
+    pbr::StandardMaterial,
     scene::{SceneInstanceReady, SceneSpawner},
     time::{Time, Timer, TimerMode},
     transform::components::Transform,
@@ -26,7 +25,10 @@ use bevy::{
 
 use rand::{Rng, seq::SliceRandom};
 
-use crate::util::{collect_entities_by, insert_recursively};
+use crate::{
+    util::{extract_entities_by, insert_recursively},
+    visibility::{Combined, Controller, MaterialBased, Param, VisibilityBased},
+};
 
 #[derive(Component)]
 #[require(CollisionEventsEnabled)]
@@ -76,13 +78,8 @@ enum ActivationWindow {
     Secondary,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct RuneIndex(usize, Entity);
-
-#[derive(Resource, Default)]
-struct RuneMaterialCache {
-    muted: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
-}
 
 struct RuneData {
     visual: RuneVisual,
@@ -91,11 +88,10 @@ struct RuneData {
 }
 
 struct RuneVisual {
-    active: Entity,
-    disabled: Entity,
-    legging_segments: [Vec<ApperanceController>; 3],
-    padding_segments: Vec<ApperanceController>,
-    progress_segments: Vec<ApperanceController>,
+    target: VisibilityBased,
+    legging_segments: [Vec<Combined<MaterialBased>>; 3],
+    padding_segments: Vec<Combined<MaterialBased>>,
+    progress_segments: Vec<Combined<VisibilityBased>>,
 }
 
 #[derive(Debug, Clone)]
@@ -138,57 +134,6 @@ const FAILURE_RECOVER: f32 = 1.5;
 const ACTIVATED_HOLD: f32 = 6.0;
 const ACTIVATION_GLOBAL_TIMEOUT: f32 = 20.0; // 20秒全局激活超时
 const ROTATION_BASELINE_SMALL: f32 = std::f32::consts::PI / 3.0; // 小机关固定角速度
-
-impl RuneMaterialCache {
-    fn ensure_muted(
-        &mut self,
-        handle: &Handle<StandardMaterial>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> Handle<StandardMaterial> {
-        let id = handle.id();
-        if let Some(existing) = self.muted.get(&id) {
-            return existing.clone();
-        }
-        let Some(original) = materials.get(handle) else {
-            return handle.clone();
-        };
-        let mut clone = original.clone();
-        clone.emissive = LinearRgba::BLACK;
-        clone.emissive_exposure_weight = 0.0;
-        let muted_handle = materials.add(clone);
-        self.muted.insert(id, muted_handle.clone());
-        muted_handle
-    }
-}
-
-struct MaterialSwap {
-    entity: Entity,
-    on: Handle<StandardMaterial>,
-    off: Handle<StandardMaterial>,
-}
-
-struct ApperanceController {
-    swaps: Vec<MaterialSwap>,
-    is_on: bool,
-}
-
-impl ApperanceController {
-    fn set(&mut self, enabled: bool, materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>) {
-        if self.is_on == enabled {
-            return;
-        }
-        for swap in &self.swaps {
-            if let Ok(mut mesh_material) = materials.get_mut(swap.entity) {
-                mesh_material.0 = if enabled {
-                    swap.on.clone()
-                } else {
-                    swap.off.clone()
-                };
-            }
-        }
-        self.is_on = enabled;
-    }
-}
 
 struct RotationController {
     baseline: f32,
@@ -239,8 +184,7 @@ const 招笑: bool = true;
 pub struct PowerRune {
     _team: RuneTeam,
     mode: RuneMode,
-    r_powered: Entity,
-    r_unpowered: Entity,
+    r: VisibilityBased,
     state: MechanismState,
     targets: Vec<RuneData>,
     rotation: RotationController,
@@ -255,16 +199,14 @@ impl PowerRune {
     fn new(
         team: RuneTeam,
         mode: RuneMode,
-        r_powered: Entity,
-        r_unpowered: Entity,
+        r: VisibilityBased,
         targets: Vec<RuneData>,
         clockwise: bool,
     ) -> Self {
         Self {
             _team: team,
             mode,
-            r_powered,
-            r_unpowered,
+            r,
             state: MechanismState::Inactive {
                 wait: Timer::from_seconds(INACTIVE_WAIT, TimerMode::Once),
             },
@@ -455,150 +397,174 @@ impl PowerRune {
         }
     }
 
-    fn apply_shared_visual(&mut self, visibilities: &mut Query<&mut Visibility>) {
+    fn apply_shared_visual(&mut self, param: &mut PowerRuneParam) {
         match &self.state {
             MechanismState::Inactive { .. } => {
-                set_visibility_if_present(self.r_powered, Visibility::Hidden, visibilities);
-                set_visibility_if_present(self.r_unpowered, Visibility::Visible, visibilities);
+                self.r.set(false, &mut param.appearance);
             }
             _ => {
-                set_visibility_if_present(self.r_powered, Visibility::Visible, visibilities);
-                set_visibility_if_present(self.r_unpowered, Visibility::Hidden, visibilities);
+                self.r.set(true, &mut param.appearance);
             }
         };
     }
 }
 
-fn collect_material_swaps_recursive(
-    entity: Entity,
-    mesh_materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
-    materials: &mut Assets<StandardMaterial>,
-    cache: &mut RuneMaterialCache,
-    query: &Query<&Children>,
-    swaps: &mut Vec<MaterialSwap>,
-) {
-    if let Ok(mut mesh_material) = mesh_materials.get_mut(entity) {
-        let on = mesh_material.0.clone();
-        let off = cache.ensure_muted(&on, materials);
-        mesh_material.0 = off.clone();
-        swaps.push(MaterialSwap { entity, on, off });
-    }
+#[derive(Resource, Default)]
+pub struct MaterialCache {
+    muted: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
+}
 
-    if let Ok(children) = query.get(entity) {
-        for child in children {
-            collect_material_swaps_recursive(
-                *child,
-                mesh_materials,
-                materials,
-                cache,
-                query,
-                swaps,
-            );
+impl MaterialCache {
+    fn ensure_muted(
+        &mut self,
+        handle: &Handle<StandardMaterial>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Handle<StandardMaterial> {
+        let id = handle.id();
+        if let Some(existing) = self.muted.get(&id) {
+            return existing.clone();
+        }
+        let Some(original) = materials.get(handle) else {
+            return handle.clone();
+        };
+        let mut clone = original.clone();
+        clone.emissive = LinearRgba::BLACK;
+        clone.emissive_exposure_weight = 0.0;
+        let muted_handle = materials.add(clone);
+        self.muted.insert(id, muted_handle.clone());
+        muted_handle
+    }
+}
+
+type Idk<'w, 's, 'g> = (
+    Entity,
+    &'g mut ResMut<'w, MaterialCache>,
+    &'g mut Param<'w, 's>,
+);
+
+impl<'w, 's, 'a> TryFrom<Idk<'w, 's, 'a>> for MaterialBased {
+    type Error = ();
+    fn try_from(value: Idk<'w, 's, 'a>) -> Result<Self, Self::Error> {
+        let (entity, cache, param) = value;
+        if let Ok(mut mesh_material) = param.mesh_materials.get_mut(entity) {
+            let off = cache.ensure_muted(&mesh_material.0, &mut param.materials);
+            let on = std::mem::replace(&mut mesh_material.0, off.clone());
+            Ok(MaterialBased {
+                entity: entity,
+                on: on,
+                off: off,
+            })
+        } else {
+            Err(())
         }
     }
 }
 
-fn create_material_swaps(
+impl<'w, 's, 'a> TryFrom<Idk<'w, 's, 'a>> for VisibilityBased {
+    type Error = ();
+    fn try_from(value: Idk<'w, 's, 'a>) -> Result<Self, Self::Error> {
+        Ok(VisibilityBased {
+            powered: value.0,
+            unpowered: None,
+        })
+    }
+}
+
+fn entity_recursive_generate<'w, 's, T: for<'g> TryFrom<Idk<'w, 's, 'g>>>(
+    entity: Entity,
+    swaps: &mut Vec<T>,
+    param: &mut PowerRuneParam<'w, 's>,
+) {
+    if let Ok(v) = T::try_from((entity, &mut param.cache, &mut param.appearance)) {
+        swaps.push(v);
+    }
+    let children = param.children;
+    if let Ok(children) = children.get(entity).clone() {
+        for child in children {
+            entity_recursive_generate(*child, swaps, param);
+        }
+    }
+}
+
+fn create_controller<'w, 's, T: Controller + for<'a> TryFrom<Idk<'w, 's, 'a>>>(
     entities: Vec<Entity>,
-    mesh_materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
-    materials: &mut Assets<StandardMaterial>,
-    cache: &mut RuneMaterialCache,
-    children: &Query<&Children>,
-) -> Vec<ApperanceController> {
+    param: &mut PowerRuneParam<'w, 's>,
+) -> Vec<Combined<T>> {
     let mut controllers = Vec::new();
     for entity in entities {
         let mut swaps = Vec::new();
-        collect_material_swaps_recursive(
-            entity,
-            mesh_materials,
-            materials,
-            cache,
-            children,
-            &mut swaps,
-        );
+        entity_recursive_generate(entity, &mut swaps, param);
         if swaps.is_empty() {
             continue;
         }
-        controllers.push(ApperanceController { swaps, is_on: true });
+        controllers.push(Combined::<T>(swaps));
     }
     controllers
-}
-
-fn set_visibility_if_present(
-    entity: Entity,
-    value: Visibility,
-    visibilities: &mut Query<&mut Visibility>,
-) {
-    if let Ok(mut visibility) = visibilities.get_mut(entity) {
-        *visibility = value;
-    }
 }
 
 fn apply_target_visual(
     mode: &RuneMode,
     visual: &mut RuneVisual,
     state: &RuneState,
-    visibilities: &mut Query<&mut Visibility>,
-    materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
+    param: &mut PowerRuneParam,
 ) {
     match state {
         RuneState::Inactive => {
-            set_visibility_if_present(visual.active, Visibility::Hidden, visibilities);
-            set_visibility_if_present(visual.disabled, Visibility::Visible, visibilities);
+            visual.target.set(false, &mut param.appearance);
             for swap in &mut visual.legging_segments {
                 for swap in swap {
-                    swap.set(false, materials);
+                    swap.set(false, &mut param.appearance);
                 }
             }
             for swap in &mut visual.padding_segments {
-                swap.set(false, materials);
+                swap.set(false, &mut param.appearance);
             }
             for swap in &mut visual.progress_segments {
-                swap.set(false, materials);
+                swap.set(false, &mut param.appearance);
             }
         }
         RuneState::Highlighted => {
-            set_visibility_if_present(visual.active, Visibility::Visible, visibilities);
-            set_visibility_if_present(visual.disabled, Visibility::Hidden, visibilities);
+            visual.target.set(true, &mut param.appearance);
             for swap in &mut visual.padding_segments {
-                swap.set(false, materials);
-            }
-            for swap in &mut visual.progress_segments {
-                swap.set(true, materials);
+                swap.set(false, &mut param.appearance);
             }
             // 高亮状态：关闭所有灯效，只显示进度灯效
             for level_swaps in &mut visual.legging_segments {
                 for swap in level_swaps {
-                    swap.set(false, materials);
+                    swap.set(false, &mut param.appearance);
+                }
+            }
+
+            if mode == &RuneMode::Large {
+                for swap in &mut visual.progress_segments {
+                    swap.set(true, &mut param.appearance);
                 }
             }
         }
         RuneState::Completed => {
-            set_visibility_if_present(visual.active, Visibility::Visible, visibilities);
-            set_visibility_if_present(visual.disabled, Visibility::Hidden, visibilities);
-
+            visual.target.set(false, &mut param.appearance);
             // 根据模式设置灯效：小机关全亮，大机关亮第1级
             for swap in &mut visual.padding_segments {
-                swap.set(true, materials);
+                swap.set(true, &mut param.appearance);
             }
             for swap in &mut visual.progress_segments {
-                swap.set(false, materials);
+                swap.set(false, &mut param.appearance);
             }
 
-            match *mode {
-                RuneMode::Small => {
+            match mode {
+                &RuneMode::Small => {
                     // 小机关：完成时所有灯臂全亮 LEGGING_1,2,3
                     for level_swaps in &mut visual.legging_segments {
                         for swap in level_swaps {
-                            swap.set(true, materials);
+                            swap.set(true, &mut param.appearance);
                         }
                     }
                 }
-                RuneMode::Large => {
+                &RuneMode::Large => {
                     // 大机关：完成时仅亮第1级灯效 LEGGING_1
                     if let Some(first_level) = visual.legging_segments.get_mut(0) {
                         for swap in first_level {
-                            swap.set(true, materials);
+                            swap.set(true, &mut param.appearance);
                         }
                     }
                 }
@@ -610,79 +576,72 @@ fn apply_target_visual(
 fn build_targets(
     face_index: usize,
     face_entity: Entity,
-    commands: &mut Commands,
-    name_map: &HashMap<String, Entity>,
-    visibilities: &mut Query<&mut Visibility>,
-    mesh_materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
-    materials: &mut Assets<StandardMaterial>,
-    cache: &mut RuneMaterialCache,
-    children: &Query<&Children>,
+    name_map: &mut HashMap<&str, Entity>,
+    param: &mut PowerRuneParam,
 ) -> Vec<RuneData> {
     let mut targets = Vec::new();
     for target_idx in 1..=5 {
-        let prefix = format!("FACE_{}_TARGET_{}", face_index, target_idx);
-        let active_name = format!("{}_ACTIVE", prefix);
-        let disabled_name = format!("{}_DISABLED", prefix);
+        let p = format!("FACE_{}_TARGET_{}", face_index, target_idx);
+        let a = format!("{}_ACTIVE", p);
+        let d = format!("{}_DISABLED", p);
+        let prefix = p.as_str();
+        let active_name = a.as_str();
+        let disabled_name = d.as_str();
 
-        let Some(&active) = name_map.get(&active_name) else {
+        let Some(&powered) = name_map.get(active_name) else {
             continue;
         };
-        let Some(&disabled) = name_map.get(&disabled_name) else {
+        let Some(&unpowered) = name_map.get(disabled_name) else {
             continue;
         };
 
-        set_visibility_if_present(active, Visibility::Hidden, visibilities);
-        set_visibility_if_present(disabled, Visibility::Visible, visibilities);
-
-        let padding_entities = collect_entities_by(name_map, |name| {
-            name.starts_with(&format!("{}_PADDING", prefix))
-        });
-        let progress_entities = collect_entities_by(name_map, |name| {
-            name.starts_with(&format!("{}_LEGGING_PROGRESSING", prefix))
-        });
-
-        let padding_segments =
-            create_material_swaps(padding_entities, mesh_materials, materials, cache, children);
-        let progress_segments = create_material_swaps(
-            progress_entities,
-            mesh_materials,
-            materials,
-            cache,
-            children,
+        let padding_segments = create_controller(
+            extract_entities_by(name_map, |name| {
+                name.starts_with(&format!("{}_PADDING", prefix))
+            }),
+            param,
+        );
+        let progress_segments = create_controller(
+            extract_entities_by(name_map, |name| {
+                name.starts_with(&format!("{}_LEGGING_PROGRESSING", prefix))
+            }),
+            param,
         );
 
         let collision_entity = if name_map.contains_key(&disabled_name) {
-            disabled
+            unpowered
         } else {
-            active
+            powered
         };
 
         let logical_index = targets.len();
-        insert_recursively(commands, collision_entity, children, &|| {
+        insert_recursively(
+            &mut param.commands,
+            collision_entity,
+            &mut param.children,
             (
                 RuneIndex(logical_index, face_entity),
                 CollisionEventsEnabled,
-            )
-        });
+            ),
+        );
 
         let mut legging_segments = [vec![], vec![], vec![]];
         for legging_idx in 1..=3 {
-            legging_segments[legging_idx - 1] = create_material_swaps(
-                collect_entities_by(name_map, |name| {
+            legging_segments[legging_idx - 1] = create_controller(
+                extract_entities_by(name_map, |name| {
                     name.starts_with(&format!("{}_LEGGING_{}", prefix, legging_idx))
                         && !name.contains("PROGRESSING")
                 }),
-                mesh_materials,
-                materials,
-                cache,
-                children,
+                param,
             )
         }
 
         targets.push(RuneData {
             visual: RuneVisual {
-                active,
-                disabled,
+                target: VisibilityBased {
+                    powered,
+                    unpowered: Some(unpowered),
+                },
                 legging_segments,
                 padding_segments,
                 progress_segments,
@@ -694,28 +653,32 @@ fn build_targets(
     targets
 }
 
-fn setup_power_rune(
-    events: On<SceneInstanceReady>,
-    mut commands: Commands,
-    power_query: Query<(), With<PowerRuneRoot>>,
-    scene_spawner: Res<SceneSpawner>,
-    names: Query<&Name>,
-    mut visibilities: Query<&mut Visibility>,
-    mut mesh_materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut cache: ResMut<RuneMaterialCache>,
-    children: Query<&Children>,
-) {
-    if !power_query.contains(events.entity) {
+#[derive(SystemParam)]
+struct PowerRuneParam<'w, 's> {
+    commands: Commands<'w, 's>,
+    scene_spawner: Res<'w, SceneSpawner>,
+    cache: ResMut<'w, MaterialCache>,
+
+    power_query: Query<'w, 's, (), With<PowerRuneRoot>>,
+    names: Query<'w, 's, &'static Name>,
+    children: Query<'w, 's, &'static Children>,
+    appearance: Param<'w, 's>,
+}
+
+fn setup_power_rune(events: On<SceneInstanceReady>, mut param: PowerRuneParam) {
+    if !param.power_query.contains(events.entity) {
         return;
     }
 
-    let mut name_map = HashMap::new();
-    for entity in scene_spawner.iter_instance_entities(events.instance_id) {
-        if let Ok(name) = names.get(entity) {
-            name_map.insert(name.as_str().to_string(), entity);
-        }
-    }
+    let names = param.names;
+    let mut name_map = param
+        .scene_spawner
+        .iter_instance_entities(events.instance_id)
+        .filter_map(|entity| names.get(entity).map(|n| (n.as_str(), entity)).ok())
+        .fold(HashMap::new(), |mut m, (name, entity)| {
+            m.insert(name, entity);
+            m
+        });
 
     if name_map.is_empty() {
         return;
@@ -745,35 +708,28 @@ fn setup_power_rune(
             RuneMode::Small
         };
 
-        let targets = build_targets(
-            index,
-            face_entity,
-            &mut commands,
-            &name_map,
-            &mut visibilities,
-            &mut mesh_materials,
-            &mut materials,
-            &mut cache,
-            &children,
-        );
+        let mut targets = build_targets(index, face_entity, &mut name_map, &mut param);
+        for target in &mut targets {
+            apply_target_visual(&mode, &mut target.visual, &RuneState::Inactive, &mut param);
+        }
 
         if targets.is_empty() {
             continue;
         }
 
-        commands.entity(face_entity).insert(PowerRune::new(
+        param.commands.entity(face_entity).insert(PowerRune::new(
             if (index & 1) > 0 {
                 RuneTeam::Red
             } else {
                 RuneTeam::Blue
             },
             mode,
-            *name_map
-                .get(&format!("FACE_{}_R_POWERED", index).to_string())
-                .unwrap(),
-            *name_map
-                .get(&format!("FACE_{}_R_UNPOWERED", index).to_string())
-                .unwrap(),
+            VisibilityBased {
+                powered: name_map
+                    .remove(format!("FACE_{}_R_POWERED", index).as_str())
+                    .unwrap(),
+                unpowered: name_map.remove(format!("FACE_{}_R_UNPOWERED", index).as_str()),
+            },
             targets,
             (index & 1) > 0,
         ));
@@ -799,7 +755,7 @@ fn handle_rune_collision(
     mut runes: Query<&mut PowerRune>,
     targets: Query<&RuneIndex>,
     projectiles: Query<(), With<Projectile>>,
-    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    mut param: PowerRuneParam,
 ) {
     let Ok(&RuneIndex(index, rune_ent)) = targets.get(event.collider2) else {
         return;
@@ -829,8 +785,11 @@ fn handle_rune_collision(
                 for rune in &mut rune.targets {
                     for leg in &mut rune.visual.legging_segments {
                         for leg in leg {
-                            leg.set(true, &mut materials);
+                            leg.set(true, &mut param.appearance);
                         }
+                    }
+                    for swap in &mut rune.visual.progress_segments {
+                        swap.set(false, &mut param.appearance);
                     }
                 }
                 if result.change_state {
@@ -914,23 +873,13 @@ fn rune_activation_tick(time: Res<Time>, mut runes: Query<&mut PowerRune>) {
     }
 }
 
-fn rune_apply_visuals(
-    mut runes: Query<&mut PowerRune>,
-    mut visibilities: Query<&mut Visibility>,
-    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
-) {
+fn rune_apply_visuals(mut runes: Query<&mut PowerRune>, mut param: PowerRuneParam) {
     for mut rune in &mut runes {
-        rune.apply_shared_visual(&mut visibilities);
+        rune.apply_shared_visual(&mut param);
         let s = rune.mode.clone();
         for target in &mut rune.targets {
             if target.state != target.applied_state {
-                apply_target_visual(
-                    &s,
-                    &mut target.visual,
-                    &target.state,
-                    &mut visibilities,
-                    &mut materials,
-                );
+                apply_target_visual(&s, &mut target.visual, &target.state, &mut param);
                 target.applied_state = target.state.clone();
             }
         }
@@ -954,7 +903,7 @@ pub struct PowerRunePlugin;
 
 impl bevy::app::Plugin for PowerRunePlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.init_resource::<RuneMaterialCache>()
+        app.init_resource::<MaterialCache>()
             .add_observer(handle_rune_collision)
             .add_observer(setup_power_rune)
             .add_systems(
