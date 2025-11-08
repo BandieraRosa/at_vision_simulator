@@ -3,6 +3,9 @@ mod power_rune;
 mod statistic;
 mod util;
 mod visibility;
+
+use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
+use bevy::window::{CursorIcon, SystemCursorIcon};
 use std::collections::HashSet;
 
 use avian3d::prelude::*;
@@ -81,7 +84,7 @@ struct Cooldown(Timer);
 /// Creates help text at the bottom of the screen.
 fn create_help_text() -> Text {
     format!(
-        "total={} accurate={} pct={}",
+        "total={} accurate={} pct={}\nControls: F2-Screenshot F3-Change Camera | WASD-Move Mouse-Look Space-Shoot",
         launch_count(),
         accurate_count(),
         accurate_pct()
@@ -133,6 +136,8 @@ fn main() {
                 freecam_controls,
                 update_camera_follow,
                 projectile_launch,
+                screenshot_on_f2,
+                screenshot_saving,
             ),
         )
         .run();
@@ -323,7 +328,7 @@ fn projectile_launch(
         return;
     }
     cooldown.0.reset();
-    if keyboard.pressed(KeyCode::KeyG) {
+    if keyboard.pressed(KeyCode::Space) {
         increase_launch();
         let direction = (gimbal.0.rotation() * launch_offset.0.rotation)
             .mul_vec3(Vec3::Y)
@@ -497,7 +502,7 @@ fn gimbal_controls(
 }
 
 fn following_controls(mut typ: ResMut<CameraMode>, keyboard: Res<ButtonInput<KeyCode>>) {
-    if keyboard.just_pressed(KeyCode::Space) {
+    if keyboard.just_pressed(KeyCode::F3) {
         typ.0 = match typ.0 {
             FollowingType::Free => FollowingType::Robot,
             FollowingType::Robot => FollowingType::ThirdPerson,
@@ -583,5 +588,37 @@ fn freecam_controls(
     }
     if keyboard.pressed(KeyCode::KeyJ) {
         camera_transform.translation -= up * speed;
+    }
+}
+
+fn screenshot_on_f2(
+    mut commands: Commands,
+    input: Res<ButtonInput<KeyCode>>,
+    mut counter: Local<u32>,
+) {
+    if input.just_pressed(KeyCode::F2) {
+        let path = format!("./screenshot-{}.png", *counter);
+        *counter += 1;
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
+    }
+}
+
+fn screenshot_saving(
+    mut commands: Commands,
+    screenshot_saving: Query<Entity, With<Capturing>>,
+    window: Single<Entity, With<Window>>,
+) {
+    match screenshot_saving.iter().count() {
+        0 => {
+            commands.entity(*window).remove::<CursorIcon>();
+        }
+        x if x > 0 => {
+            commands
+                .entity(*window)
+                .insert(CursorIcon::from(SystemCursorIcon::Progress));
+        }
+        _ => {}
     }
 }

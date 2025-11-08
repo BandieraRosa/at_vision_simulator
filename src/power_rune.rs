@@ -4,6 +4,7 @@ use avian3d::prelude::{CollisionEventsEnabled, CollisionStart};
 use bevy::{
     app::Update,
     asset::{AssetId, Assets, Handle},
+    color::LinearRgba,
     ecs::{
         component::Component,
         entity::Entity,
@@ -427,6 +428,7 @@ impl MaterialCache {
             return handle.clone();
         };
         let mut clone = original.clone();
+        clone.emissive = LinearRgba::BLACK;
         clone.emissive_exposure_weight = 0.0;
         let muted_handle = materials.add(clone);
         self.muted.insert(id, muted_handle.clone());
