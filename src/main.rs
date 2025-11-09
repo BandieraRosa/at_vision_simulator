@@ -1,5 +1,6 @@
 mod handler;
 mod power_rune;
+mod ros2;
 mod statistic;
 mod util;
 mod visibility;
@@ -114,6 +115,7 @@ fn update_help_text(mut text: Query<&mut Text>) {
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        .add_plugins(ros2::ROS2Plugin::default())
         .add_plugins((EguiPlugin::default(), WorldInspectorPlugin::new()))
         //.add_plugins(PhysicsDebugPlugin::default())
         .add_plugins(PowerRunePlugin)
