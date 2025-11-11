@@ -1,11 +1,9 @@
-mod camera_calibration;
 mod handler;
 mod robomaster;
 mod ros2;
 mod statistic;
 mod util;
 mod visibility;
-use bevy::camera::{ImageRenderTarget, RenderTarget};
 use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy::window::{CursorIcon, SystemCursorIcon};
 use std::collections::HashSet;
@@ -121,7 +119,6 @@ fn main() {
         .add_plugins((EguiPlugin::default(), WorldInspectorPlugin::new()))
         //.add_plugins(PhysicsDebugPlugin::default())
         .add_plugins(PowerRunePlugin)
-        .add_plugins(camera_calibration::CameraCalibrationPlugin)
         .insert_resource(CameraMode(FollowingType::Robot))
         .insert_resource(Gravity(Vec3::NEG_Y * 9.81))
         .insert_resource(SubstepCount(20))
@@ -143,7 +140,6 @@ fn main() {
                 projectile_launch,
                 screenshot_on_f2,
                 screenshot_saving,
-                camera_calibration::calibration_keyboard_input,
             ),
         )
         .run();
@@ -237,10 +233,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         Camera3d::default(),
-        Camera {
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
-            ..default()
-        },
+        Camera::default(),
         MotionBlur {
             shutter_angle: 0.25,
             samples: 4,
@@ -411,7 +404,7 @@ const MAX_VEHICLE_VELOCITY: f32 = 6.0;
 
 fn vehicle_controls(
     time: Res<Time>,
-    typ: Res<CameraMode>,
+    mode: Res<CameraMode>,
     keyboard: Res<ButtonInput<KeyCode>>,
     infantry: Single<Forces, (With<InfantryRoot>, With<LocalInfantry>)>,
     gimbal: Single<
@@ -423,7 +416,7 @@ fn vehicle_controls(
         (With<LocalInfantry>, Without<InfantryGimbal>),
     >,
 ) {
-    if typ.0 == FollowingType::Free {
+    if mode.0 == FollowingType::Free {
         return;
     }
 
@@ -508,9 +501,9 @@ fn gimbal_controls(
     gimbal_transform.rotation = gimbal_rotation;
 }
 
-fn following_controls(mut typ: ResMut<CameraMode>, keyboard: Res<ButtonInput<KeyCode>>) {
+fn following_controls(mut mode: ResMut<CameraMode>, keyboard: Res<ButtonInput<KeyCode>>) {
     if keyboard.just_pressed(KeyCode::F3) {
-        typ.0 = match typ.0 {
+        mode.0 = match mode.0 {
             FollowingType::Free => FollowingType::Robot,
             FollowingType::Robot => FollowingType::ThirdPerson,
             FollowingType::ThirdPerson => FollowingType::Free,
@@ -523,12 +516,12 @@ fn update_camera_follow(
     infantry: Single<&Transform, (With<InfantryRoot>, With<LocalInfantry>)>,
     gimbal: Single<&Transform, (With<LocalInfantry>, With<InfantryGimbal>)>,
     view_offset: Single<&InfantryViewOffset, With<LocalInfantry>>,
-    typ: Res<CameraMode>,
+    mode: Res<CameraMode>,
 ) {
     let gimbal_transform = gimbal.into_inner();
     let (mut camera_transform, camera_offset) = camera_query.into_inner();
 
-    match typ.0 {
+    match mode.0 {
         FollowingType::Robot => {
             camera_transform.translation = infantry.translation
                 + (infantry.rotation * gimbal_transform.rotation) * view_offset.0.translation;
@@ -546,12 +539,12 @@ fn update_camera_follow(
 
 fn freecam_controls(
     time: Res<Time>,
-    typ: Res<CameraMode>,
+    mode: Res<CameraMode>,
     mut mouse_motion_events: MessageReader<MouseMotion>,
     keyboard: Res<ButtonInput<KeyCode>>,
     camera_query: Single<&mut Transform, (With<MainCamera>, Without<InfantryRoot>)>,
 ) {
-    if typ.0 != FollowingType::Free {
+    if mode.0 != FollowingType::Free {
         return;
     }
 

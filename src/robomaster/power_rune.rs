@@ -46,13 +46,13 @@ enum RuneAction {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum RuneTeam {
+pub enum RuneTeam {
     Red,
     Blue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum RuneMode {
+pub enum RuneMode {
     Small,
     Large,
 }
@@ -66,25 +66,25 @@ enum MechanismState {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-enum RuneState {
+pub enum RuneState {
     Inactive,
     Highlighted,
     Completed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ActivationWindow {
+pub enum ActivationWindow {
     Primary,
     Secondary,
 }
 
 #[derive(Component, Clone)]
-struct RuneIndex(usize, Entity);
+pub struct RuneIndex(pub usize, pub Entity);
 
-struct RuneData {
+pub struct RuneData {
     visual: RuneVisual,
-    state: RuneState,
-    applied_state: RuneState,
+    pub state: RuneState,
+    pub applied_state: RuneState,
 }
 
 struct RuneVisual {
@@ -182,11 +182,11 @@ const 招笑: bool = true;
 
 #[derive(Component)]
 pub struct PowerRune {
-    _team: RuneTeam,
-    mode: RuneMode,
+    pub _team: RuneTeam,
+    pub mode: RuneMode,
     r: VisibilityBased,
     state: MechanismState,
-    targets: Vec<RuneData>,
+    pub targets: Vec<RuneData>,
     rotation: RotationController,
 }
 
