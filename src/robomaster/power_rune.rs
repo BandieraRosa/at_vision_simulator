@@ -23,10 +23,10 @@ use bevy::{
     transform::components::Transform,
 };
 
-use rand::{Rng, seq::SliceRandom};
+use rand::{seq::SliceRandom, Rng};
 
 use crate::{
-    util::{drain_entities_by, insert_recursively},
+    util::{drain_entities_by, insert_all_child},
     visibility::{Combined, Controller, MaterialBased, Param, VisibilityBased},
 };
 
@@ -611,14 +611,16 @@ fn build_targets(
         };
 
         let logical_index = targets.len();
-        insert_recursively(
+        insert_all_child(
             &mut param.commands,
             collision_entity,
             &mut param.children,
-            (
-                RuneIndex(logical_index, face_entity),
-                CollisionEventsEnabled,
-            ),
+            || {
+                (
+                    RuneIndex(logical_index, face_entity),
+                    CollisionEventsEnabled,
+                )
+            },
         );
 
         let mut legging_segments = [vec![], vec![], vec![]];

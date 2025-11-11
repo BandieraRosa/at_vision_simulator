@@ -21,11 +21,11 @@ pub fn drain_entities_by<T, F: Fn(&T) -> bool>(
         .collect()
 }
 
-pub fn insert_recursively<B: Bundle + Clone>(
+pub fn insert_all_child<B: Bundle + Clone, F: Fn() -> B>(
     commands: &mut Commands,
     root: Entity,
     query: &Query<&Children>,
-    bundle: B,
+    bundle: F,
 ) {
     let mut set = HashSet::new();
     let mut stack = VecDeque::new();
@@ -35,7 +35,7 @@ pub fn insert_recursively<B: Bundle + Clone>(
         if !set.insert(entity) {
             continue;
         }
-        commands.entity(entity).insert(bundle.clone());
+        commands.entity(entity).insert(bundle());
         if let Ok(children) = query.get(entity) {
             stack.extend(children.iter().copied());
         }
