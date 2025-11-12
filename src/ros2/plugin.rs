@@ -40,10 +40,10 @@ macro_rules! bevy_transform_ros2 {
 macro_rules! bevy_xyzw {
     ($quat:expr) => {
         r2r::geometry_msgs::msg::Quaternion {
-            x: ($quat).x as f64,
-            y: ($quat).y as f64,
-            z: ($quat).z as f64,
-            w: ($quat).w as f64,
+            x: $quat.x as f64,
+            y: $quat.y as f64,
+            z: $quat.z as f64,
+            w: $quat.w as f64,
         }
     };
 }

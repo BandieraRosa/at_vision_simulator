@@ -3,7 +3,6 @@ mod robomaster;
 mod ros2;
 mod statistic;
 mod util;
-mod visibility;
 use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
 use bevy::window::{CursorIcon, SystemCursorIcon};
 use std::collections::HashSet;
