@@ -16,6 +16,7 @@ use crate::{
     robomaster::power_rune::{PowerRune, RuneIndex}, InfantryGimbal, InfantryRoot, InfantryViewOffset,
     LocalInfantry,
 };
+use r2r::sensor_msgs::msg::JointState;
 use r2r::ClockType::RosTime;
 use r2r::{
     geometry_msgs::msg::TransformStamped, sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest}, std_msgs::msg::Header, tf2_msgs::msg::TFMessage, Clock, Context,
@@ -100,7 +101,7 @@ pub struct SensorPublisher<T: WrappedTypesupport>(pub Arc<Mutex<Publisher<T>>>);
 fn capture_power_rune(
     clock: ResMut<RoboMasterClock>,
     runes: Query<(&GlobalTransform, &PowerRune)>,
-    targets: Query<(&GlobalTransform, &RuneIndex)>,
+    targets: Query<(&GlobalTransform, &RuneIndex), Changed<GlobalTransform>>,
     tf_publisher: Res<SensorPublisher<TFMessage>>,
 ) {
     let mut ls = vec![];
@@ -137,13 +138,22 @@ fn capture_power_rune(
         .unwrap();
 }
 
+fn capture_local_infantry(
+    _infantry: Single<&Transform, (With<InfantryRoot>, With<LocalInfantry>)>,
+    gimbal: Single<&GlobalTransform, (With<LocalInfantry>, With<InfantryGimbal>)>,
+    _view_offset: Single<&InfantryViewOffset, With<LocalInfantry>>,
+) {
+}
+
 fn capture_frame(mut commands: Commands, _input: Res<ButtonInput<KeyCode>>) {
     commands.spawn(Screenshot::primary_window()).observe(
         |ev: On<ScreenshotCaptured>,
          perspective: Single<&Projection, With<MainCamera>>,
-         _infantry: Single<&Transform, (With<InfantryRoot>, With<LocalInfantry>)>,
-         gimbal: Single<&GlobalTransform, (With<LocalInfantry>, With<InfantryGimbal>)>,
-         _view_offset: Single<&InfantryViewOffset, With<LocalInfantry>>,
+
+         infantry: Single<&Transform, (With<InfantryRoot>, With<LocalInfantry>)>,
+         gimbal: Single<&Transform, (With<LocalInfantry>, With<InfantryGimbal>)>,
+         view_offset: Single<&InfantryViewOffset, With<LocalInfantry>>,
+
          clock: ResMut<RoboMasterClock>,
          info_publisher: Res<SensorPublisher<CameraInfo>>,
          tf_publisher: Res<SensorPublisher<TFMessage>>,
@@ -156,6 +166,10 @@ fn capture_frame(mut commands: Commands, _input: Res<ButtonInput<KeyCode>>) {
             let img = ev.image.clone();
 
             let (camera_info, image) = compute_camera(*perspective, &hdr, img);
+            let translation = infantry.translation
+                + (infantry.rotation * gimbal.rotation) * view_offset.0.translation;
+            let rotation = infantry.rotation * gimbal.rotation;
+
             res_unwrap!(tf_publisher)
                 .publish(&TFMessage {
                     transforms: vec![TransformStamped {
@@ -164,7 +178,10 @@ fn capture_frame(mut commands: Commands, _input: Res<ButtonInput<KeyCode>>) {
                             frame_id: "map".to_string(),
                         },
                         child_frame_id: "camera_optical_frame".to_string(),
-                        transform: bevy_transform!(gimbal),
+                        transform: r2r::geometry_msgs::msg::Transform {
+                            translation: bevy_xyz!(translation),
+                            rotation: bevy_rot!(rotation),
+                        },
                     }],
                 })
                 .unwrap();
@@ -269,6 +286,7 @@ impl Plugin for ROS2Plugin {
         publisher!(app, node, CameraInfo, "/camera_info");
         publisher!(app, node, Image, "/image_raw");
         publisher!(app, node, TFMessage, "/tf");
+        publisher!(app, node, JointState, "/joint_states");
 
         app.insert_resource(RoboMasterClock(arc_mutex!(Clock::create(RosTime).unwrap())))
             .insert_resource(StopSignal(signal_arc.clone()))
