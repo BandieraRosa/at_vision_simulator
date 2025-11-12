@@ -8,7 +8,7 @@ use bevy::{
     pbr::{MeshMaterial3d, StandardMaterial},
 };
 
-use crate::util::set_visibility;
+use crate::util::bevy::set_visibility;
 
 #[derive(SystemParam)]
 pub struct Param<'w, 's> {

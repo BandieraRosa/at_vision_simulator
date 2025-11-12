@@ -11,6 +11,7 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
+use std::collections::VecDeque;
 use crate::{
     robomaster::power_rune::{PowerRune, RuneIndex}, InfantryGimbal, InfantryRoot, InfantryViewOffset,
     LocalInfantry,

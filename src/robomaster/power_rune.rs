@@ -25,7 +25,7 @@ use bevy::{
 
 use rand::{seq::SliceRandom, Rng};
 
-use crate::util::{drain_entities_by, insert_all_child};
+use crate::util::bevy::{drain_entities_by, insert_all_child};
 use crate::robomaster::visibility::{Combined, Controller, MaterialBased, Param, VisibilityBased};
 
 #[derive(Component)]
