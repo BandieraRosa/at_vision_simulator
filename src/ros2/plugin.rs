@@ -1,20 +1,10 @@
-use bevy::{
-    prelude::*,
-    render::view::screenshot::{Screenshot, ScreenshotCaptured},
-};
-use std::time::Duration;
-use std::{
-    f32::consts::PI,
-    sync::{
-        atomic::{AtomicBool, Ordering}, Arc,
-        Mutex,
-    },
-    thread::{self, JoinHandle},
-};
-use std::collections::VecDeque;
 use crate::{
     robomaster::power_rune::{PowerRune, RuneIndex}, InfantryGimbal, InfantryRoot, InfantryViewOffset,
     LocalInfantry,
+};
+use bevy::{
+    prelude::*,
+    render::view::screenshot::{Screenshot, ScreenshotCaptured},
 };
 use r2r::sensor_msgs::msg::JointState;
 use r2r::ClockType::RosTime;
@@ -24,6 +14,15 @@ use r2r::{
     Publisher,
     QosProfile,
     WrappedTypesupport,
+};
+use std::time::Duration;
+use std::{
+    f32::consts::PI,
+    sync::{
+        atomic::{AtomicBool, Ordering}, Arc,
+        Mutex,
+    },
+    thread::{self, JoinHandle},
 };
 
 macro_rules! arc_mutex {
