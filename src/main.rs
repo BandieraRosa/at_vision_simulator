@@ -4,7 +4,7 @@ mod ros2;
 mod statistic;
 mod util;
 use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
-use bevy::window::{CursorIcon, SystemCursorIcon};
+use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
 use std::collections::HashSet;
 
 use avian3d::prelude::*;
@@ -113,7 +113,17 @@ fn update_help_text(mut text: Query<&mut Text>) {
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    present_mode: PresentMode::AutoVsync,
+                    fit_canvas_to_parent: true,
+                    ..default()
+                }),
+                ..default()
+            }),
+            PhysicsPlugins::default(),
+        ))
         .add_plugins(ROS2Plugin::default())
         .add_plugins((EguiPlugin::default(), WorldInspectorPlugin::new()))
         //.add_plugins(PhysicsDebugPlugin::default())
@@ -126,7 +136,7 @@ fn main() {
         .insert_resource(Gravity(Vec3::NEG_Y * 9.81))
         .insert_resource(SubstepCount(20))
         .insert_resource(Cooldown(Timer::from_seconds(0.1, TimerMode::Once)))
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, setup_projectile))
         .add_observer(setup_vehicle)
         .add_observer(setup_collision)
         .add_observer(on_hit)
@@ -335,13 +345,32 @@ fn setup_vehicle(
     }
 }
 
-fn projectile_launch(
-    time: Res<Time>,
-    _asset_server: Res<AssetServer>,
+fn setup_projectile(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands.insert_resource(ProjectileSetting(
+        meshes.add(Sphere::new(44.5 * 0.001 / 2.0)),
+        materials.add(StandardMaterial {
+            base_color: Color::srgba(0.132866, 1.0, 0.132869, 0.55),
+            emissive: LinearRgba::new(0.132866, 1.0, 0.132869, 0.55),
+            emissive_exposure_weight: -1.0,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+    ));
+}
+
+#[derive(Resource)]
+struct ProjectileSetting(Handle<Mesh>, Handle<StandardMaterial>);
+
+fn projectile_launch(
+    time: Res<Time>,
+    _asset_server: Res<AssetServer>,
     mut cooldown: ResMut<Cooldown>,
+    mut commands: Commands,
+    setting: Res<ProjectileSetting>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gimbal: Single<
         (&GlobalTransform, &InfantryGimbal),
@@ -367,7 +396,7 @@ fn projectile_launch(
             RigidBody::Dynamic,
             Collider::sphere(44.5 * 0.001 / 2.0),
             Mass(44.5 * 0.001),
-            Friction::new(0.1),
+            Friction::new(1.1),
             Restitution::new(0.00005),
             LinearDamping(0.05),
             CollisionLayers::new(
@@ -380,11 +409,8 @@ fn projectile_launch(
                     GameLayer::Environment,
                 ],
             ),
-            Mesh3d(meshes.add(Sphere::new(44.5 * 0.001 / 2.0))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::linear_rgba(1.0, 1.0, 1.0, 0.55),
-                ..default()
-            })),
+            Mesh3d(setting.0.clone()),
+            MeshMaterial3d(setting.1.clone()),
             LinearVelocity(vel),
             Transform::IDENTITY.with_translation(
                 gimbal.0.translation() + (gimbal.0.rotation() * launch_offset.0.translation),
