@@ -1,26 +1,26 @@
 use crate::{
-    robomaster::power_rune::{PowerRune, RuneIndex}, InfantryGimbal, InfantryRoot, InfantryViewOffset,
-    LocalInfantry,
+    InfantryGimbal, InfantryRoot, InfantryViewOffset, LocalInfantry,
+    robomaster::power_rune::{PowerRune, RuneIndex},
 };
 use bevy::{
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured},
 };
-use r2r::sensor_msgs::msg::JointState;
 use r2r::ClockType::RosTime;
 use r2r::{
-    geometry_msgs::msg::TransformStamped, sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest}, std_msgs::msg::Header, tf2_msgs::msg::TFMessage, Clock, Context,
-    Node,
-    Publisher,
-    QosProfile,
-    WrappedTypesupport,
+    Clock, Context, Node, Publisher, QosProfile, WrappedTypesupport,
+    geometry_msgs::msg::TransformStamped,
+    sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest},
+    std_msgs::msg::Header,
+    tf2_msgs::msg::TFMessage,
 };
+use std::mem::swap;
 use std::time::Duration;
 use std::{
     f32::consts::PI,
     sync::{
-        atomic::{AtomicBool, Ordering}, Arc,
-        Mutex,
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
 };
@@ -33,7 +33,7 @@ macro_rules! arc_mutex {
 
 macro_rules! bevy_transform_ros2 {
     ($rotation:expr) => {
-        (($rotation) * Quat::from_euler(EulerRot::YXZ, 0.0, PI, 0.0))
+        (($rotation) * ::bevy::prelude::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
     };
 }
 
@@ -57,9 +57,10 @@ macro_rules! bevy_rot {
 macro_rules! bevy_xyz {
     ($t:ty, $translation:expr) => {{
         let mut tmp: $t = ::std::default::Default::default();
-        tmp.x = $translation.x as f64;
-        tmp.y = $translation.y as f64;
-        tmp.z = $translation.z as f64;
+
+        tmp.x = $translation.z as f64;
+        tmp.y = -$translation.x as f64;
+        tmp.z = $translation.y as f64;
         tmp
     }};
     ($translation:expr) => {
@@ -104,6 +105,7 @@ fn capture_power_rune(
     tf_publisher: Res<SensorPublisher<TFMessage>>,
 ) {
     let mut ls = vec![];
+
     let stamp = Clock::to_builtin_time(&res_unwrap!(clock).get_now().unwrap());
 
     for (transform, rune) in runes {
@@ -285,7 +287,9 @@ impl Plugin for ROS2Plugin {
         publisher!(app, node, CameraInfo, "/camera_info");
         publisher!(app, node, Image, "/image_raw");
         publisher!(app, node, TFMessage, "/tf");
-        publisher!(app, node, JointState, "/joint_states");
+        // publisher!(app, node, TFMessage, "/gimbal_link"); //map global transform ros2系 translation+rotation
+        // publisher!(app, node, TFMessage, "/odom"); //map global ros2系 translation
+        // publisher!(app, node, TFMessage, "/camera_link"); //rotation gimbal_link
 
         app.insert_resource(RoboMasterClock(arc_mutex!(Clock::create(RosTime).unwrap())))
             .insert_resource(StopSignal(signal_arc.clone()))

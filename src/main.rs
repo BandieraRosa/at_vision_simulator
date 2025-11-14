@@ -3,12 +3,10 @@ mod robomaster;
 mod ros2;
 mod statistic;
 mod util;
-use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
-use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
-use std::collections::HashSet;
-
 use avian3d::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
+use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
 use bevy::{
     anti_alias::fxaa::Fxaa,
     core_pipeline::tonemapping::Tonemapping,
@@ -19,6 +17,8 @@ use bevy::{
     scene::{SceneInstance, SceneInstanceReady},
 };
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+use std::collections::HashSet;
+use std::ops::Add;
 
 use crate::ros2::plugin::ROS2Plugin;
 use crate::{
@@ -89,7 +89,7 @@ fn create_help_text() -> Text {
         accurate_count(),
         accurate_pct()
     )
-    .into()
+        .into()
 }
 
 /// Spawns the help text at the bottom of the screen.
@@ -150,10 +150,13 @@ fn main() {
                 gimbal_controls,
                 freecam_controls,
                 update_camera_follow,
-                projectile_launch,
                 screenshot_on_f2,
                 screenshot_saving,
             ),
+        )
+        .add_systems(
+            PostUpdate,
+            (projectile_launch.after(TransformSystems::Propagate)),
         )
         .run();
 }
@@ -372,6 +375,10 @@ fn projectile_launch(
     mut commands: Commands,
     setting: Res<ProjectileSetting>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    infantry: Single<
+        (&LinearVelocity, &AngularVelocity),
+        (With<InfantryRoot>, With<LocalInfantry>),
+    >,
     gimbal: Single<
         (&GlobalTransform, &InfantryGimbal),
         (With<LocalInfantry>, Without<InfantryChassis>),
@@ -391,7 +398,7 @@ fn projectile_launch(
         if direction == Vec3::ZERO {
             return;
         }
-        let vel = direction * 25.0;
+        let vel = infantry.0.0 + direction * 25.0;
         commands.spawn((
             RigidBody::Dynamic,
             Collider::sphere(44.5 * 0.001 / 2.0),
@@ -412,6 +419,7 @@ fn projectile_launch(
             Mesh3d(setting.0.clone()),
             MeshMaterial3d(setting.1.clone()),
             LinearVelocity(vel),
+            AngularVelocity(infantry.1.0),
             Transform::IDENTITY.with_translation(
                 gimbal.0.translation() + (gimbal.0.rotation() * launch_offset.0.translation),
             ),
