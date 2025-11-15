@@ -31,9 +31,13 @@ macro_rules! arc_mutex {
 
 macro_rules! bevy_transform_ros2 {
     ($rotation:expr) => {
-        (($rotation) * ::bevy::prelude::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+        ($rotation
+            * ::bevy::prelude::Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2)
+            * ::bevy::prelude::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+        )
     };
 }
+
 
 macro_rules! bevy_xyzw {
     ($quat:expr) => {
