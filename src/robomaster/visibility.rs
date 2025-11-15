@@ -77,15 +77,14 @@ impl Control for Controller {
                     Activation::Activated => (activated, [deactivated, activating, completed]),
                     Activation::Completed => (completed, [deactivated, activating, activated]),
                 };
-                println!("{:?} {:?}: {:?}", state, show, hide);
-                if let Some(show) = show {
-                    set_visibility(*show, Visibility::Visible, &mut param.visibilities).unwrap();
-                }
                 for entity in hide {
                     if let Some(entity) = entity {
                         set_visibility(*entity, Visibility::Hidden, &mut param.visibilities)
                             .unwrap();
                     }
+                }
+                if let Some(show) = show {
+                    set_visibility(*show, Visibility::Visible, &mut param.visibilities).unwrap();
                 }
             }
             Self::Combined(vec) => {

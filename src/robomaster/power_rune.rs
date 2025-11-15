@@ -87,20 +87,31 @@ struct RuneVisual {
 
 impl RuneVisual {
     pub fn apply(&mut self, mode: RuneMode, activation: Activation, param: &mut PowerRuneParam) {
-        self.target.set(activation, &mut param.appearance);
-
-        if activation == Activation::Activated {
-            let mut leggings: &mut [Controller] = &mut self.legging_segments;
-            if mode == RuneMode::Large {
-                // 大机关：完成时仅亮第1级灯效 LEGGING_1
-                leggings = &mut self.legging_segments[0..=1];
+        match mode {
+            RuneMode::Small => {
+                self.target.set(activation, &mut param.appearance);
+                for swap in &mut self.legging_segments {
+                    swap.set(activation, &mut param.appearance);
+                }
             }
-            for swap in leggings {
-                swap.set(activation, &mut param.appearance);
-            }
-        } else {
-            for swap in &mut self.legging_segments {
-                swap.set(Activation::Deactivated, &mut param.appearance);
+            RuneMode::Large => {
+                self.target.set(
+                    match activation {
+                        Activation::Activated => Activation::Deactivated,
+                        _ => activation,
+                    },
+                    &mut param.appearance,
+                );
+                match activation {
+                    Activation::Activated => {
+                        self.legging_segments[0].set(activation, &mut param.appearance)
+                    }
+                    _ => {
+                        for legging in &mut self.legging_segments {
+                            legging.set(activation, &mut param.appearance);
+                        }
+                    }
+                }
             }
         }
 
@@ -825,12 +836,12 @@ fn rune_activation_tick(time: Res<Time>, mut runes: Query<&mut PowerRune>) {
 
 fn rune_apply_visuals(mut runes: Query<&mut PowerRune>, mut param: PowerRuneParam) {
     for mut rune in &mut runes {
-        let mode = rune.mode;
         rune.apply_shared_visual(&mut param);
+        let mode = rune.mode;
         for target in &mut rune.targets {
             if target.state != target.applied_state {
                 target.visual.apply(mode, target.state, &mut param);
-                target.applied_state = target.state.clone();
+                target.applied_state = target.state;
             }
         }
     }
