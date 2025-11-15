@@ -124,7 +124,7 @@ fn main() {
             }),
             PhysicsPlugins::default(),
         ))
-        .add_plugins(ROS2Plugin::default())
+        //.add_plugins(ROS2Plugin::default())
         .add_plugins((EguiPlugin::default(), WorldInspectorPlugin::new()))
         //.add_plugins(PhysicsDebugPlugin::default())
         .add_plugins(PowerRunePlugin)
