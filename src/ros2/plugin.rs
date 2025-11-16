@@ -7,8 +7,7 @@ use crate::{
 use bevy::prelude::*;
 use r2r::ClockType::RosTime;
 use r2r::{
-    sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest}, std_msgs::msg::Header, tf2_msgs::msg::TFMessage
-    ,
+    sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest}, std_msgs::msg::Header, tf2_msgs::msg::TFMessage,
     Clock,
     Context,
     Node,
@@ -22,18 +21,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-
 const M_ALIGN_MAT3: Mat3 = Mat3::from_cols(
-    Vec3::new(0.0, 1.0, 0.0),  // M[0,0], M[1,0], M[2,0]
+    Vec3::new(1.0, 0.0, 0.0),  // M[0,0], M[1,0], M[2,0]
     Vec3::new(0.0, 0.0, 1.0),  // M[0,1], M[1,1], M[2,1]
-    Vec3::new(-1.0, 0.0, 0.0), // M[0,2], M[1,2], M[2,2]
+    Vec3::new(0.0, -1.0, 0.0), // M[0,2], M[1,2], M[2,2]
 );
 
 macro_rules! bevy_transform_ros2 {
-    ($rotation:expr) => {{
-        let (yaw, pitch, roll) = $rotation.to_euler(EulerRot::YXZ);
-        Quat::from_euler(EulerRot::ZYX, yaw, pitch, roll)
-    }};
+    ($rotation:expr) => {{ Quat::from_rotation_x(std::f32::consts::FRAC_PI_2) * $rotation }};
 }
 
 macro_rules! bevy_quat {
@@ -138,28 +133,51 @@ fn capture_frame(
         stamp: stamp.clone(),
         frame_id: "map".to_string(),
     };
+    let odom_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "odom".to_string(),
+    };
     let gimbal_hdr = Header {
         stamp: stamp.clone(),
         frame_id: "gimbal_link".to_string(),
     };
-
+    let camera_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "camera_link".to_string(),
+    };
     let img = ev.image.clone();
-    let (camera_info, image) = compute_camera(&perspective, gimbal_hdr.clone(), img);
-
-    let translation =
-        infantry.translation + (infantry.rotation * gimbal.rotation) * view_offset.0.translation;
-    let rotation = infantry.rotation * gimbal.rotation;
-    let rotation = rotation;
-
+    let (camera_info, image) = compute_camera(&perspective, camera_hdr.clone(), img);
     camera_info_pub.publish(camera_info);
     image_raw_pub.publish(image);
+
+    // 计算 transform
+    let gimbal_translation =
+        infantry.translation + (infantry.rotation * gimbal.rotation) * view_offset.0.translation;
+    let gimbal_rotation = infantry.rotation * gimbal.rotation;
+
+    let camera_translation = view_offset.0.translation; // 相对 gimbal_link
+    let camera_rotation = Quat::IDENTITY; // 或者相机自身旋转
 
     add_tf_frame!(
         transform_stamped,
         map_hdr.clone(),
+        "odom",
+        infantry.translation,
+        infantry.rotation
+    );
+    add_tf_frame!(
+        transform_stamped,
+        odom_hdr.clone(),
         "gimbal_link",
-        translation,
-        rotation
+        gimbal.translation,
+        gimbal.rotation
+    );
+    add_tf_frame!(
+        transform_stamped,
+        gimbal_hdr.clone(),
+        "camera_link",
+        camera_translation,
+        camera_rotation
     );
 
     for (transform, rune) in runes {
@@ -221,7 +239,11 @@ fn compute_camera(
             width,
             distortion_model: "none".to_string(),
             d: vec![0.000, 0.000, 0.000, 0.000, 0.000],
-            k: vec![f_x, 0.0, c_x, 0.0, f_y, c_y, 0.0, 0.0, 1.0],
+            k: vec![
+                f_x, 0.0, c_x,
+                0.0, f_y, c_y,
+                0.0, 0.0, 1.0
+            ],
             r: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             p: vec![f_x, 0.0, c_x, 0.0, 0.0, f_y, c_y, 0.0, 0.0, 0.0, 1.0, 0.0],
             binning_x: 0,

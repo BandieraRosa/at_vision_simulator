@@ -11,14 +11,17 @@ use crate::{
     statistic::{accurate_count, accurate_pct, increase_launch, launch_count},
 };
 use avian3d::prelude::*;
+use bevy::camera::Exposure;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+use bevy::light::light_consts::lux;
+use bevy::pbr::Atmosphere;
 use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
 use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
 use bevy::{
     anti_alias::fxaa::Fxaa,
     core_pipeline::tonemapping::Tonemapping,
     input::mouse::MouseMotion,
-    post_process::{bloom::Bloom, motion_blur::MotionBlur},
+    post_process::motion_blur::MotionBlur,
     prelude::*,
     render::view::Hdr,
     scene::{SceneInstance, SceneInstanceReady},
@@ -174,6 +177,7 @@ fn setup(
         DirectionalLight {
             color: Color::srgb(0.9, 0.95, 1.0),
             shadows_enabled: true,
+            illuminance: lux::DIRECT_SUNLIGHT,
             ..default()
         },
         Transform::from_xyz(0.0, 4.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -279,6 +283,7 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
+        Atmosphere::EARTH,
         Camera::default(),
         MotionBlur {
             shutter_angle: 0.25,
@@ -291,11 +296,16 @@ fn setup(
             far: 500000000.0,
             ..default()
         }),
+        AmbientLight {
+            brightness: 4000.0,
+            color: Color::WHITE,
+            ..default()
+        },
+        Exposure::SUNLIGHT,
+        Tonemapping::AcesFitted,
         Msaa::Off,
         Fxaa::default(),
         Hdr,
-        Tonemapping::ReinhardLuminance,
-        Bloom::NATURAL,
         Transform::from_xyz(0.0, 10.0, 15.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
         MainCamera {
             follow_offset: Vec3::new(0.0, 3.0, 2.0),
@@ -450,15 +460,16 @@ fn setup_collision(
     >,
 ) {
     if root_query.contains(events.entity) {
-        commands.entity(events.entity).insert((
-            ColliderConstructorHierarchy::new(ColliderConstructor::VoxelizedTrimeshFromMesh {
-                voxel_size: 0.025,
-                fill_mode: FillMode::FloodFill {
-                    detect_cavities: true,
+        commands
+            .entity(events.entity)
+            .insert((ColliderConstructorHierarchy::new(
+                ColliderConstructor::VoxelizedTrimeshFromMesh {
+                    voxel_size: 0.025,
+                    fill_mode: FillMode::FloodFill {
+                        detect_cavities: true,
+                    },
                 },
-            }),
-            CollisionMargin(0.01),
-        ));
+            ),));
     }
 }
 

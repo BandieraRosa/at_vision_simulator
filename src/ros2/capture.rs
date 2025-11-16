@@ -1,4 +1,10 @@
 use crate::ros2::plugin::MainCamera;
+use bevy::anti_alias::fxaa::Fxaa;
+use bevy::camera::Exposure;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::pbr::Atmosphere;
+use bevy::post_process::motion_blur::MotionBlur;
+use bevy::render::view::Hdr;
 use bevy::{
     image::TextureFormatPixelInfo,
     prelude::*,
@@ -64,8 +70,7 @@ impl ImageCopier {
         size: Extent3d,
         render_device: &RenderDevice,
     ) -> ImageCopier {
-        let padded_bytes_per_row =
-            RenderDevice::align_copy_bytes_per_row(size.width as usize) * 4;
+        let padded_bytes_per_row = RenderDevice::align_copy_bytes_per_row(size.width as usize) * 4;
 
         let cpu_buffer = render_device.create_buffer(&BufferDescriptor {
             label: None,
@@ -189,7 +194,7 @@ impl Plugin for RosCapturePlugin {
             width: self.width,
             height: self.height,
         })
-            .add_systems(Update, sync_camera);
+        .add_systems(Update, sync_camera);
 
         app.add_systems(Startup, setup_capture_scene);
 
@@ -238,10 +243,31 @@ fn setup_capture_scene(
 
     commands.spawn((
         Camera3d::default(),
+        Atmosphere::EARTH,
         Camera {
             target: render_target_handle.clone().into(),
             ..default()
         },
+        MotionBlur {
+            shutter_angle: 0.25,
+            samples: 4,
+        },
+        Projection::Perspective(PerspectiveProjection {
+            fov: std::f32::consts::PI / 180.0 * 45.0,
+            near: 0.1,
+            far: 500000000.0,
+            ..default()
+        }),
+        AmbientLight {
+            brightness: 4000.0,
+            color: Color::WHITE,
+            ..default()
+        },
+        Exposure::SUNLIGHT,
+        Tonemapping::AcesFitted,
+        Msaa::Off,
+        Fxaa::default(),
+        Hdr,
         CaptureCamera,
     ));
 }
