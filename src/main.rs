@@ -460,14 +460,16 @@ fn setup_collision(
     >,
 ) {
     if root_query.contains(events.entity) {
-        commands.entity(events.entity).insert(
-            (ColliderConstructorHierarchy::new(ColliderConstructor::VoxelizedTrimeshFromMesh {
-                voxel_size: 0.025,
-                fill_mode: FillMode::FloodFill {
-                    detect_cavities: true,
+        commands
+            .entity(events.entity)
+            .insert(ColliderConstructorHierarchy::new(
+                ColliderConstructor::VoxelizedTrimeshFromMesh {
+                    voxel_size: 0.025,
+                    fill_mode: FillMode::FloodFill {
+                        detect_cavities: true,
+                    },
                 },
-            })),
-        );
+            ));
     }
 }
 

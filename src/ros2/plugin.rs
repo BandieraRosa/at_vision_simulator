@@ -29,13 +29,6 @@ const M_ALIGN_MAT3: Mat3 = Mat3::from_cols(
     Vec3::new(-1.0, 0.0, 0.0), // M[0,2], M[1,2], M[2,2]
 );
 
-const M_ALIGN_MAT4: Mat4 = Mat4::from_cols(
-    Vec4::new(0.0, -1.0, 0.0, 0.0), // M[0,0], M[1,0], M[2,0]
-    Vec4::new(0.0, 0.0, 1.0, 0.0),  // M[0,1], M[1,1], M[2,1]
-    Vec4::new(-1.0, 0.0, 0.0, 0.0), // M[0,2], M[1,2], M[2,2]
-    Vec4::new(0.0, 0.0, 0.0, 1.0),  // M[0,2], M[1,2], M[2,2]
-);
-
 #[inline]
 fn transform(bevy_transform: Transform) -> ::r2r::geometry_msgs::msg::Transform {
     let align_rot_mat = M_ALIGN_MAT3;
@@ -164,22 +157,8 @@ fn capture_frame(
     camera_info_pub.publish(camera_info);
     image_raw_pub.publish(image);
 
-    let camera_translation = view_offset.0.translation; // 相对 gimbal_link
-    let camera_rotation = Quat::from_rotation_y(PI); // Add 180 deg rotation around X for optical frame convention
-
-    let tr = transform(
-        Transform::IDENTITY
-            .with_translation(infantry.translation)
-            .with_rotation(gimbal.rotation),
-    );
-    let (infantry_translation, gimbal_rotation) = (tr.translation, tr.rotation);
-
     gimbal_pose_pub.publish(pose!(gimbal_hdr));
-
-    let tr = transform(infantry.clone());
-    let (infantry_translation, infantry_rotation) = (tr.translation, tr.rotation);
     odom_pose_pub.publish(pose!(odom_hdr));
-
     camera_pose_pub.publish(pose!(camera_hdr));
 
     add_tf_frame!(
@@ -200,7 +179,7 @@ fn capture_frame(
         transform_stamped,
         gimbal_hdr.clone(),
         "camera_link",
-        camera_translation,
+        view_offset.0.translation,
         Quat::IDENTITY
     );
     add_tf_frame!(
