@@ -322,6 +322,7 @@ impl Plugin for ROS2Plugin {
         let mut node = Node::create(Context::create().unwrap(), "simulator", "robomaster").unwrap();
         let signal_arc = Arc::new(AtomicBool::new(false));
         publisher!(
+            signal_arc,
             app,
             node,
             CameraInfoTopic,
