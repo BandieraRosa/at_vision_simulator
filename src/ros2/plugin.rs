@@ -130,12 +130,12 @@ fn capture_frame(
 
     clock: ResMut<RoboMasterClock>,
 
-    tf_publisher: Res<TopicPublisher<GlobalTransformTopic>>,
-    camera_info_pub: Res<TopicPublisher<CameraInfoTopic>>,
-    image_raw_pub: Res<TopicPublisher<ImageRawTopic>>,
-    gimbal_pose_pub: Res<TopicPublisher<GimbalPoseTopic>>,
-    odom_pose_pub: Res<TopicPublisher<OdomPoseTopic>>,
-    camera_pose_pub: Res<TopicPublisher<CameraPoseTopic>>,
+    mut tf_publisher: ResMut<TopicPublisher<GlobalTransformTopic>>,
+    mut camera_info_pub: ResMut<TopicPublisher<CameraInfoTopic>>,
+    mut image_raw_pub: ResMut<TopicPublisher<ImageRawTopic>>,
+    mut gimbal_pose_pub: ResMut<TopicPublisher<GimbalPoseTopic>>,
+    mut odom_pose_pub: ResMut<TopicPublisher<OdomPoseTopic>>,
+    mut camera_pose_pub: ResMut<TopicPublisher<CameraPoseTopic>>,
 ) {
     let stamp = Clock::to_builtin_time(&res_unwrap!(clock).get_now().unwrap());
     let mut transform_stamped = vec![];
