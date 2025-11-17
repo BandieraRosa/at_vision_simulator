@@ -96,6 +96,27 @@ macro_rules! add_tf_frame {
     };
 }
 
+macro_rules! pose {
+    ($hdr:expr) => {
+        PoseStamped {
+            header: $hdr.clone(),
+            pose: Pose {
+                position: r2r::geometry_msgs::msg::Point {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                orientation: r2r::geometry_msgs::msg::Quaternion {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    w: 1.0,
+                },
+            },
+        }
+    };
+}
+
 fn capture_frame(
     ev: On<Captured>,
     perspective: Single<&Projection, With<MainCamera>>,
@@ -134,8 +155,12 @@ fn capture_frame(
         stamp: stamp.clone(),
         frame_id: "camera_link".to_string(),
     };
+    let optical_frame_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "camera_optical_frame".to_string(),
+    };
     let img = ev.image.clone();
-    let (camera_info, image) = compute_camera(&perspective, camera_hdr.clone(), img);
+    let (camera_info, image) = compute_camera(&perspective, optical_frame_hdr.clone(), img);
     camera_info_pub.publish(camera_info);
     image_raw_pub.publish(image);
 
@@ -149,58 +174,13 @@ fn capture_frame(
     );
     let (infantry_translation, gimbal_rotation) = (tr.translation, tr.rotation);
 
-    gimbal_pose_pub.publish(PoseStamped {
-        header: gimbal_hdr.clone(),
-        pose: Pose {
-            position: r2r::geometry_msgs::msg::Point {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            orientation: r2r::geometry_msgs::msg::Quaternion {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-                w: 1.0,
-            },
-        },
-    });
+    gimbal_pose_pub.publish(pose!(gimbal_hdr));
 
     let tr = transform(infantry.clone());
     let (infantry_translation, infantry_rotation) = (tr.translation, tr.rotation);
-    odom_pose_pub.publish(PoseStamped {
-        header: odom_hdr.clone(),
-        pose: Pose {
-            position: r2r::geometry_msgs::msg::Point {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            orientation: r2r::geometry_msgs::msg::Quaternion {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-                w: 1.0,
-            },
-        },
-    });
+    odom_pose_pub.publish(pose!(odom_hdr));
 
-    camera_pose_pub.publish(PoseStamped {
-        header: camera_hdr.clone(),
-        pose: Pose {
-            position: r2r::geometry_msgs::msg::Point {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            orientation: r2r::geometry_msgs::msg::Quaternion {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-                w: 1.0,
-            },
-        },
-    });
+    camera_pose_pub.publish(pose!(camera_hdr));
 
     add_tf_frame!(
         transform_stamped,
@@ -222,6 +202,13 @@ fn capture_frame(
         "camera_link",
         camera_translation,
         Quat::IDENTITY
+    );
+    add_tf_frame!(
+        transform_stamped,
+        camera_hdr.clone(),
+        "camera_optical_frame",
+        Vec3::ZERO,
+        Quat::from_euler(EulerRot::ZYX, -PI / 2.0, PI, PI / 2.0)
     );
 
     for (transform, rune) in runes {
