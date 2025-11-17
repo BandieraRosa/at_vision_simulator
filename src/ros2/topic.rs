@@ -1,4 +1,4 @@
-use bevy::prelude::{Resource, Timer, TimerMode};
+use bevy::prelude::Resource;
 use r2r::geometry_msgs::msg::PoseStamped;
 use r2r::sensor_msgs::msg::{CameraInfo, Image};
 use r2r::tf2_msgs::msg::TFMessage;
@@ -41,22 +41,25 @@ impl<T: RosTopic> TopicPublisher<T> {
 
 #[macro_export]
 macro_rules! publisher {
-    ($atomic:expr, $app:ident, $node:ident, $topic:ty) => {
-        let atomic = $atomic.clone();
+    ($node:ident,$topic:ty) => {
+        {
+            let (sender, receiver): (
+                ::std::sync::mpsc::SyncSender<<$topic as crate::ros2::topic::RosTopic>::T>,
+                ::std::sync::mpsc::Receiver<<$topic as crate::ros2::topic::RosTopic>::T>,
+            ) = ::std::sync::mpsc::sync_channel(1024);
 
-        let (sender, receiver): (
-            ::std::sync::mpsc::SyncSender<<$topic as crate::ros2::topic::RosTopic>::T>,
-            ::std::sync::mpsc::Receiver<<$topic as crate::ros2::topic::RosTopic>::T>,
-        ) = ::std::sync::mpsc::sync_channel(1024);
-
-        let publisher = $node
-            .create_publisher(
+            let publisher = $node.create_publisher(
                 <$topic>::TOPIC,
                 ::r2r::QosProfile::default().lifespan(::std::time::Duration::from_secs_f64(1.0)),
-            )
-            .unwrap();
+            ).unwrap();
 
-        $app.insert_resource(crate::ros2::topic::TopicPublisher::<$topic>::new(sender.clone(), <$topic>::FREQUENCY));
+            (receiver, sender, publisher)
+        }
+    };
+    ($atomic:expr, $app:ident, $node:ident, $topic:ty) => {
+        let atomic = $atomic.clone();
+        let (receiver,sender,publisher) = publisher!($node, $topic);
+        $app.insert_resource(crate::ros2::topic::TopicPublisher::<$topic>::new(sender, <$topic>::FREQUENCY));
 
         ::std::thread::spawn(move || {
             while !atomic.load(::std::sync::atomic::Ordering::Acquire) {

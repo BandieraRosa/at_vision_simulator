@@ -1,4 +1,4 @@
-use crate::ros2::capture::{Captured, RosCapturePlugin};
+use crate::ros2::capture::{CaptureConfig, Captured, RosCapturePlugin};
 use crate::ros2::topic::*;
 use crate::{
     arc_mutex, publisher, robomaster::power_rune::{PowerRune, RuneIndex}, InfantryGimbal, InfantryRoot, InfantryViewOffset,
@@ -333,11 +333,16 @@ impl Plugin for ROS2Plugin {
             CameraPoseTopic
         );
 
-        app.insert_resource(RoboMasterClock(arc_mutex!(Clock::create(RosTime).unwrap())))
+        let clock = arc_mutex!(Clock::create(RosTime).unwrap());
+
+        app.insert_resource(RoboMasterClock(clock.clone()))
             .insert_resource(StopSignal(signal_arc.clone()))
             .add_plugins(RosCapturePlugin {
-                width: 1440,
-                height: 1080,
+                config: CaptureConfig {
+                    width: 1440,
+                    height: 1080,
+                    fov: PI / 180.0 * 45.0,
+                },
             })
             .add_observer(capture_frame)
             .add_systems(Last, cleanup_ros2_system)

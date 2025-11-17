@@ -460,16 +460,14 @@ fn setup_collision(
     >,
 ) {
     if root_query.contains(events.entity) {
-        commands
-            .entity(events.entity)
-            .insert((ColliderConstructorHierarchy::new(
-                ColliderConstructor::VoxelizedTrimeshFromMesh {
-                    voxel_size: 0.025,
-                    fill_mode: FillMode::FloodFill {
-                        detect_cavities: true,
-                    },
+        commands.entity(events.entity).insert(
+            (ColliderConstructorHierarchy::new(ColliderConstructor::VoxelizedTrimeshFromMesh {
+                voxel_size: 0.025,
+                fill_mode: FillMode::FloodFill {
+                    detect_cavities: true,
                 },
-            )));
+            })),
+        );
     }
 }
 
@@ -699,8 +697,7 @@ fn update_camera_follow(
         FollowingType::Robot => {
             camera_transform.translation = infantry.translation
                 + (infantry.rotation * gimbal_transform.rotation) * view_offset.0.translation;
-            camera_transform.rotation =
-                infantry.rotation * gimbal_transform.rotation;
+            camera_transform.rotation = infantry.rotation * gimbal_transform.rotation;
         }
         FollowingType::ThirdPerson => {
             let base_transform = infantry.into_inner();

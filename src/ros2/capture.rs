@@ -182,19 +182,15 @@ fn receive_image_from_buffer(
 }
 
 pub struct RosCapturePlugin {
-    pub width: u32,
-    pub height: u32,
+    pub config: CaptureConfig,
 }
 
 impl Plugin for RosCapturePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ImageCopyPlugin);
 
-        app.insert_resource(CaptureConfig {
-            width: self.width,
-            height: self.height,
-        })
-        .add_systems(Update, sync_camera);
+        app.insert_resource(self.config.clone())
+            .add_systems(Update, sync_camera);
 
         app.add_systems(Startup, setup_capture_scene);
 
@@ -202,10 +198,11 @@ impl Plugin for RosCapturePlugin {
     }
 }
 
-#[derive(Resource)]
-struct CaptureConfig {
-    width: u32,
-    height: u32,
+#[derive(Resource, Clone)]
+pub struct CaptureConfig {
+    pub width: u32,
+    pub height: u32,
+    pub fov: f32,
 }
 
 #[derive(Component, Deref, DerefMut)]
@@ -253,7 +250,7 @@ fn setup_capture_scene(
             samples: 4,
         },
         Projection::Perspective(PerspectiveProjection {
-            fov: std::f32::consts::PI / 180.0 * 45.0,
+            fov: config.fov,
             near: 0.1,
             far: 500000000.0,
             ..default()
