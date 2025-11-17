@@ -5,6 +5,7 @@ use crate::{
     LocalInfantry,
 };
 use bevy::prelude::*;
+use r2r::geometry_msgs::msg::{Pose, PoseStamped};
 use r2r::ClockType::RosTime;
 use r2r::{
     sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest}, std_msgs::msg::Header, tf2_msgs::msg::TFMessage,
@@ -12,6 +13,7 @@ use r2r::{
     Context,
     Node,
 };
+use std::f32::consts::PI;
 use std::time::Duration;
 use std::{
     sync::{
@@ -22,54 +24,37 @@ use std::{
 };
 
 const M_ALIGN_MAT3: Mat3 = Mat3::from_cols(
-    Vec3::new(1.0, 0.0, 0.0),  // M[0,0], M[1,0], M[2,0]
+    Vec3::new(0.0, -1.0, 0.0), // M[0,0], M[1,0], M[2,0]
     Vec3::new(0.0, 0.0, 1.0),  // M[0,1], M[1,1], M[2,1]
-    Vec3::new(0.0, -1.0, 0.0), // M[0,2], M[1,2], M[2,2]
+    Vec3::new(-1.0, 0.0, 0.0), // M[0,2], M[1,2], M[2,2]
 );
 
-macro_rules! bevy_transform_ros2 {
-    ($rotation:expr) => {{ Quat::from_rotation_x(std::f32::consts::FRAC_PI_2) * $rotation }};
-}
+const M_ALIGN_MAT4: Mat4 = Mat4::from_cols(
+    Vec4::new(0.0, -1.0, 0.0, 0.0), // M[0,0], M[1,0], M[2,0]
+    Vec4::new(0.0, 0.0, 1.0, 0.0),  // M[0,1], M[1,1], M[2,1]
+    Vec4::new(-1.0, 0.0, 0.0, 0.0), // M[0,2], M[1,2], M[2,2]
+    Vec4::new(0.0, 0.0, 0.0, 1.0),  // M[0,2], M[1,2], M[2,2]
+);
 
-macro_rules! bevy_quat {
-    ($quat:expr) => {
-        ::r2r::geometry_msgs::msg::Quaternion {
-            x: $quat.x as f64,
-            y: $quat.y as f64,
-            z: $quat.z as f64,
-            w: $quat.w as f64,
-        }
-    };
-}
-
-macro_rules! bevy_rot {
-    ($rotation:expr) => {
-        bevy_quat!(bevy_transform_ros2!($rotation))
-    };
-}
-
-macro_rules! bevy_xyz {
-    ($t:ty, $translation:expr) => {{
-        let vec = (M_ALIGN_MAT3 * $translation);
-        let mut tmp: $t = ::std::default::Default::default();
-
-        tmp.x = vec.x as f64;
-        tmp.y = vec.y as f64;
-        tmp.z = vec.z as f64;
-        tmp
-    }};
-    ($translation:expr) => {
-        bevy_xyz!(r2r::geometry_msgs::msg::Vector3, $translation)
-    };
-}
-
-macro_rules! bevy_transform {
-    ($transform:expr) => {
-        r2r::geometry_msgs::msg::Transform {
-            translation: bevy_xyz!($transform.translation()),
-            rotation: bevy_rot!($transform.rotation()),
-        }
-    };
+#[inline]
+fn transform(bevy_transform: Transform) -> ::r2r::geometry_msgs::msg::Transform {
+    let align_rot_mat = M_ALIGN_MAT3;
+    let align_quat = Quat::from_mat3(&align_rot_mat);
+    let new_rotation = align_quat * bevy_transform.rotation * align_quat.inverse();
+    let new_translation = align_rot_mat * bevy_transform.translation;
+    r2r::geometry_msgs::msg::Transform {
+        translation: r2r::geometry_msgs::msg::Vector3 {
+            x: new_translation.x as f64,
+            y: new_translation.y as f64,
+            z: new_translation.z as f64,
+        },
+        rotation: r2r::geometry_msgs::msg::Quaternion {
+            x: new_rotation.x as f64,
+            y: new_rotation.y as f64,
+            z: new_rotation.z as f64,
+            w: new_rotation.w as f64,
+        },
+    }
 }
 
 macro_rules! res_unwrap {
@@ -95,17 +80,18 @@ macro_rules! add_tf_frame {
         $ls.push(::r2r::geometry_msgs::msg::TransformStamped {
             header: $hdr.clone(),
             child_frame_id: $id.to_string(),
-            transform: ::r2r::geometry_msgs::msg::Transform {
-                translation: bevy_xyz!($translation),
-                rotation: bevy_rot!($rotation),
-            },
+            transform: transform(
+                Transform::IDENTITY
+                    .with_translation($translation)
+                    .with_rotation($rotation),
+            ),
         });
     };
     ($ls:ident, $hdr:expr, $id:expr, $transform:expr) => {
         $ls.push(::r2r::geometry_msgs::msg::TransformStamped {
             header: $hdr.clone(),
             child_frame_id: $id.to_string(),
-            transform: bevy_transform!($transform),
+            transform: transform($transform),
         });
     };
 }
@@ -126,6 +112,9 @@ fn capture_frame(
     tf_publisher: Res<TopicPublisher<GlobalTransformTopic>>,
     camera_info_pub: Res<TopicPublisher<CameraInfoTopic>>,
     image_raw_pub: Res<TopicPublisher<ImageRawTopic>>,
+    gimbal_pose_pub: Res<TopicPublisher<GimbalPoseTopic>>,
+    odom_pose_pub: Res<TopicPublisher<OdomPoseTopic>>,
+    camera_pose_pub: Res<TopicPublisher<CameraPoseTopic>>,
 ) {
     let stamp = Clock::to_builtin_time(&res_unwrap!(clock).get_now().unwrap());
     let mut transform_stamped = vec![];
@@ -150,13 +139,68 @@ fn capture_frame(
     camera_info_pub.publish(camera_info);
     image_raw_pub.publish(image);
 
-    // 计算 transform
-    let gimbal_translation =
-        infantry.translation + (infantry.rotation * gimbal.rotation) * view_offset.0.translation;
-    let gimbal_rotation = infantry.rotation * gimbal.rotation;
-
     let camera_translation = view_offset.0.translation; // 相对 gimbal_link
-    let camera_rotation = Quat::IDENTITY; // 或者相机自身旋转
+    let camera_rotation = Quat::from_rotation_y(PI); // Add 180 deg rotation around X for optical frame convention
+
+    let tr = transform(
+        Transform::IDENTITY
+            .with_translation(infantry.translation)
+            .with_rotation(gimbal.rotation),
+    );
+    let (infantry_translation, gimbal_rotation) = (tr.translation, tr.rotation);
+
+    gimbal_pose_pub.publish(PoseStamped {
+        header: gimbal_hdr.clone(),
+        pose: Pose {
+            position: r2r::geometry_msgs::msg::Point {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            orientation: r2r::geometry_msgs::msg::Quaternion {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            },
+        },
+    });
+
+    let tr = transform(infantry.clone());
+    let (infantry_translation, infantry_rotation) = (tr.translation, tr.rotation);
+    odom_pose_pub.publish(PoseStamped {
+        header: odom_hdr.clone(),
+        pose: Pose {
+            position: r2r::geometry_msgs::msg::Point {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            orientation: r2r::geometry_msgs::msg::Quaternion {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            },
+        },
+    });
+
+    camera_pose_pub.publish(PoseStamped {
+        header: camera_hdr.clone(),
+        pose: Pose {
+            position: r2r::geometry_msgs::msg::Point {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            orientation: r2r::geometry_msgs::msg::Quaternion {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            },
+        },
+    });
 
     add_tf_frame!(
         transform_stamped,
@@ -177,7 +221,7 @@ fn capture_frame(
         gimbal_hdr.clone(),
         "camera_link",
         camera_translation,
-        camera_rotation
+        Quat::IDENTITY
     );
 
     for (transform, rune) in runes {
@@ -187,7 +231,7 @@ fn capture_frame(
             format!("power_rune_{:?}", rune.mode)
                 .to_string()
                 .to_lowercase(),
-            transform
+            transform.compute_transform()
         );
     }
     for (target_transform, target) in targets {
@@ -198,7 +242,7 @@ fn capture_frame(
                 format!("power_rune_{:?}_{:?}", rune.mode, target.0)
                     .to_string()
                     .to_lowercase(),
-                target_transform
+                target_transform.compute_transform()
             );
         }
     }
@@ -232,6 +276,8 @@ fn compute_camera(
     let c_x = width as f64 / 2.0;
     let c_y = height as f64 / 2.0;
 
+    // Removed x-axis flip; rely on optical rotation instead
+
     (
         CameraInfo {
             header: hdr.clone(),
@@ -239,13 +285,9 @@ fn compute_camera(
             width,
             distortion_model: "none".to_string(),
             d: vec![0.000, 0.000, 0.000, 0.000, 0.000],
-            k: vec![
-                f_x, 0.0, c_x,
-                0.0, f_y, c_y,
-                0.0, 0.0, 1.0
-            ],
-            r: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            k: vec![f_x, 0.0, c_x, 0.0, f_y, c_y, 0.0, 0.0, 1.0],
             p: vec![f_x, 0.0, c_x, 0.0, 0.0, f_y, c_y, 0.0, 0.0, 0.0, 1.0, 0.0],
+            r: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             binning_x: 0,
             binning_y: 0,
             roi: RegionOfInterest {
@@ -298,6 +340,9 @@ impl Plugin for ROS2Plugin {
             CameraInfoTopic,
             ImageRawTopic,
             GlobalTransformTopic,
+            GimbalPoseTopic,
+            OdomPoseTopic,
+            CameraPoseTopic
         );
 
         app.insert_resource(RoboMasterClock(arc_mutex!(Clock::create(RosTime).unwrap())))

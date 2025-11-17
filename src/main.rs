@@ -394,7 +394,7 @@ fn projectile_launch(
     setting: Res<ProjectileSetting>,
     keyboard: Res<ButtonInput<KeyCode>>,
     infantry: Single<
-        (&LinearVelocity, &AngularVelocity),
+        (&Transform, &LinearVelocity, &AngularVelocity),
         (With<InfantryRoot>, With<LocalInfantry>),
     >,
     gimbal: Single<
@@ -416,7 +416,7 @@ fn projectile_launch(
         if direction == Vec3::ZERO {
             return;
         }
-        let vel = infantry.0.0 + direction * 25.0;
+        let vel = infantry.1.0 + direction * 25.0;
         commands.spawn((
             RigidBody::Dynamic,
             Collider::sphere(44.5 * 0.001 / 2.0),
@@ -437,9 +437,9 @@ fn projectile_launch(
             Mesh3d(setting.0.clone()),
             MeshMaterial3d(setting.1.clone()),
             LinearVelocity(vel),
-            AngularVelocity(infantry.1.0),
+            AngularVelocity(infantry.2.0),
             Transform::IDENTITY.with_translation(
-                gimbal.0.translation() + (gimbal.0.rotation() * launch_offset.0.translation),
+                infantry.0.translation + (gimbal.0.rotation() * launch_offset.0.translation),
             ),
             //AudioPlayer::new(asset_server.load("projectile_launch.ogg")),
             Projectile,
@@ -469,7 +469,7 @@ fn setup_collision(
                         detect_cavities: true,
                     },
                 },
-            ),));
+            )));
     }
 }
 
@@ -699,7 +699,8 @@ fn update_camera_follow(
         FollowingType::Robot => {
             camera_transform.translation = infantry.translation
                 + (infantry.rotation * gimbal_transform.rotation) * view_offset.0.translation;
-            camera_transform.rotation = infantry.rotation * gimbal_transform.rotation;
+            camera_transform.rotation =
+                infantry.rotation * gimbal_transform.rotation;
         }
         FollowingType::ThirdPerson => {
             let base_transform = infantry.into_inner();

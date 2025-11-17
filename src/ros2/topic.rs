@@ -1,4 +1,5 @@
 use bevy::prelude::Resource;
+use r2r::geometry_msgs::msg::{Pose, PoseStamped};
 use r2r::sensor_msgs::msg::{CameraInfo, Image};
 use r2r::tf2_msgs::msg::TFMessage;
 use r2r::{Publisher, WrappedTypesupport};
@@ -50,3 +51,7 @@ macro_rules! define_topic {
 define_topic!(CameraInfoTopic, CameraInfo, "/camera_info");
 define_topic!(ImageRawTopic, Image, "/image_raw");
 define_topic!(GlobalTransformTopic, TFMessage, "/tf");
+
+define_topic!(GimbalPoseTopic, PoseStamped, "/gimbal_pose");
+define_topic!(OdomPoseTopic, PoseStamped, "/odom_pose");
+define_topic!(CameraPoseTopic, PoseStamped, "/camera_pose");
