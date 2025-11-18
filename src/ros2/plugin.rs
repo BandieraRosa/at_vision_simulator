@@ -6,7 +6,7 @@ use crate::{
 };
 use bevy::prelude::*;
 use r2r::geometry_msgs::msg::{Pose, PoseStamped};
-use r2r::ClockType::RosTime;
+use r2r::ClockType::{RosTime, SystemTime};
 use r2r::{
     sensor_msgs::msg::{CameraInfo, Image, RegionOfInterest}, std_msgs::msg::Header, tf2_msgs::msg::TFMessage,
     Clock,
@@ -110,6 +110,53 @@ macro_rules! pose {
     };
 }
 
+fn capture_rune(
+    runes: Query<(&GlobalTransform, &PowerRune)>,
+    targets: Query<(&GlobalTransform, &RuneIndex)>,
+
+    clock: ResMut<RoboMasterClock>,
+
+    mut tf_publisher: ResMut<TopicPublisher<GlobalTransformTopic>>,
+) {
+    let stamp = Clock::to_builtin_time(&res_unwrap!(clock).get_now().unwrap());
+    let mut transform_stamped = vec![];
+    let map_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "map".to_string(),
+    };
+
+    for (transform, rune) in runes {
+        add_tf_frame!(
+            transform_stamped,
+            map_hdr.clone(),
+            format!("power_rune_{:?}", rune.mode)
+                .to_string()
+                .to_lowercase(),
+            transform.compute_transform()
+        );
+    }
+    for (target_transform, target) in targets {
+        if let Ok((_rune_transform, rune)) = runes.get(target.1) {
+            add_tf_frame!(
+                transform_stamped,
+                Header {
+                    stamp: stamp.clone(),
+                    frame_id: format!("power_rune_{:?}", rune.mode)
+                        .to_string()
+                        .to_lowercase(),
+                },
+                format!("power_rune_{:?}_{:?}", rune.mode, target.0)
+                    .to_string()
+                    .to_lowercase(),
+                target_transform.reparented_to(_rune_transform)
+            );
+        }
+    }
+    tf_publisher.publish(TFMessage {
+        transforms: transform_stamped,
+    });
+}
+
 fn capture_frame(
     ev: On<Captured>,
     perspective: Single<&Projection, With<MainCamera>>,
@@ -118,14 +165,12 @@ fn capture_frame(
     gimbal: Single<&Transform, (With<LocalInfantry>, With<InfantryGimbal>)>,
     view_offset: Single<&InfantryViewOffset, With<LocalInfantry>>,
 
-    runes: Query<(&GlobalTransform, &PowerRune)>,
-    targets: Query<(&GlobalTransform, &RuneIndex)>,
-
     clock: ResMut<RoboMasterClock>,
 
     mut tf_publisher: ResMut<TopicPublisher<GlobalTransformTopic>>,
     mut camera_info_pub: ResMut<TopicPublisher<CameraInfoTopic>>,
     mut image_raw_pub: ResMut<TopicPublisher<ImageRawTopic>>,
+    mut image_compressed_pub: ResMut<TopicPublisher<ImageCompressedTopic>>,
     mut gimbal_pose_pub: ResMut<TopicPublisher<GimbalPoseTopic>>,
     mut odom_pose_pub: ResMut<TopicPublisher<OdomPoseTopic>>,
     mut camera_pose_pub: ResMut<TopicPublisher<CameraPoseTopic>>,
@@ -153,6 +198,7 @@ fn capture_frame(
         frame_id: "camera_optical_frame".to_string(),
     };
     let img = ev.image.clone();
+    //image_compressed_pub.publish(compress_image(optical_frame_hdr.clone(), &img));
     let (camera_info, image) = compute_camera(&perspective, optical_frame_hdr.clone(), img);
     camera_info_pub.publish(camera_info);
     image_raw_pub.publish(image);
@@ -189,29 +235,6 @@ fn capture_frame(
         Vec3::ZERO,
         Quat::from_euler(EulerRot::ZYX, -PI / 2.0, PI, PI / 2.0)
     );
-
-    for (transform, rune) in runes {
-        add_tf_frame!(
-            transform_stamped,
-            map_hdr.clone(),
-            format!("power_rune_{:?}", rune.mode)
-                .to_string()
-                .to_lowercase(),
-            transform.compute_transform()
-        );
-    }
-    for (target_transform, target) in targets {
-        if let Ok((_rune_transform, rune)) = runes.get(target.1) {
-            add_tf_frame!(
-                transform_stamped,
-                map_hdr.clone(),
-                format!("power_rune_{:?}_{:?}", rune.mode, target.0)
-                    .to_string()
-                    .to_lowercase(),
-                target_transform.compute_transform()
-            );
-        }
-    }
     tf_publisher.publish(TFMessage {
         transforms: transform_stamped,
     });
@@ -306,13 +329,14 @@ impl Plugin for ROS2Plugin {
             node,
             CameraInfoTopic,
             ImageRawTopic,
+            ImageCompressedTopic,
             GlobalTransformTopic,
             GimbalPoseTopic,
             OdomPoseTopic,
             CameraPoseTopic
         );
 
-        let clock = arc_mutex!(Clock::create(RosTime).unwrap());
+        let clock = arc_mutex!(Clock::create(SystemTime).unwrap());
 
         app.insert_resource(RoboMasterClock(clock.clone()))
             .insert_resource(StopSignal(signal_arc.clone()))
@@ -325,6 +349,7 @@ impl Plugin for ROS2Plugin {
             })
             .add_observer(capture_frame)
             .add_systems(Last, cleanup_ros2_system)
+            .add_systems(Update, capture_rune.after(TransformSystems::Propagate))
             .insert_resource(SpinThreadHandle(Some(thread::spawn(move || {
                 while !signal_arc.load(Ordering::Acquire) {
                     node.spin_once(Duration::from_millis(10));

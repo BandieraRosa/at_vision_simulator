@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use avian3d::prelude::{CollisionEventsEnabled, CollisionStart};
+use bevy::color::palettes::css::CRIMSON;
+use bevy::prelude::{default, Gizmo, GizmoAsset, GizmoLineConfig, Isometry3d};
 use bevy::{
     app::Update,
     asset::{AssetId, Assets, Handle},
@@ -22,7 +24,6 @@ use bevy::{
     time::{Time, Timer, TimerMode},
     transform::components::Transform,
 };
-
 use rand::{seq::SliceRandom, Rng};
 
 use crate::robomaster::visibility::{Activation, Control, Controller, Param};
@@ -571,12 +572,25 @@ fn build_targets(
         let completed = name_map.remove(completed);
 
         let logical_index = targets.len();
+        let mut gizmo = GizmoAsset::new();
+        gizmo
+            .sphere(Isometry3d::IDENTITY, 0.15, CRIMSON)
+            .resolution(30_000 / 3);
+        let handle = param.gizmo_assets.add(gizmo);
         for entity in [deactivated, activating, activated] {
             if let Some(entity) = entity {
                 insert_all_child(&mut param.commands, entity, &mut param.children, || {
                     (
                         RuneIndex(logical_index, face_entity),
                         CollisionEventsEnabled,
+                        Gizmo {
+                            handle: handle.clone(),
+                            line_config: GizmoLineConfig {
+                                width: 2.,
+                                ..default()
+                            },
+                            ..default()
+                        },
                     )
                 });
             }
@@ -619,6 +633,8 @@ struct PowerRuneParam<'w, 's> {
     commands: Commands<'w, 's>,
     scene_spawner: Res<'w, SceneSpawner>,
     cache: ResMut<'w, MaterialCache>,
+
+    gizmo_assets: ResMut<'w, Assets<GizmoAsset>>,
 
     power_query: Query<'w, 's, (), With<PowerRuneRoot>>,
     names: Query<'w, 's, &'static Name>,

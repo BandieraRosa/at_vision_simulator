@@ -14,12 +14,11 @@ use avian3d::prelude::*;
 use bevy::camera::Exposure;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::light::light_consts::lux;
-use bevy::pbr::Atmosphere;
+use bevy::post_process::bloom::Bloom;
 use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
 use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
 use bevy::{
     anti_alias::fxaa::Fxaa,
-    core_pipeline::tonemapping::Tonemapping,
     input::mouse::MouseMotion,
     post_process::motion_blur::MotionBlur,
     prelude::*,
@@ -283,7 +282,7 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        Atmosphere::EARTH,
+        Bloom::NATURAL,
         Camera::default(),
         MotionBlur {
             shutter_angle: 0.25,
@@ -296,13 +295,7 @@ fn setup(
             far: 500000000.0,
             ..default()
         }),
-        AmbientLight {
-            brightness: 4000.0,
-            color: Color::WHITE,
-            ..default()
-        },
         Exposure::SUNLIGHT,
-        Tonemapping::AcesFitted,
         Msaa::Off,
         Fxaa::default(),
         Hdr,
@@ -485,7 +478,7 @@ fn vehicle_controls(
     time: Res<Time>,
     mode: Res<CameraMode>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    infantry: Single<Forces, (With<InfantryRoot>, With<LocalInfantry>)>,
+    infantry: Single<(Forces, &Mass), (With<InfantryRoot>, With<LocalInfantry>)>,
     gimbal: Single<
         (&GlobalTransform, &InfantryGimbal),
         (With<LocalInfantry>, Without<InfantryChassis>),
@@ -514,7 +507,7 @@ fn vehicle_controls(
     }
 
     let dt = time.delta_secs();
-    let mut forces = infantry.into_inner();
+    let (mut forces, mass) = infantry.into_inner();
 
     let (mut chassis_transform, mut chassis_data) = chassis.into_inner();
     let (gimbal_transform, _gimbal) = gimbal.into_inner();
@@ -525,14 +518,14 @@ fn vehicle_controls(
     let right_xz = right.with_y(0.0).normalize_or_zero();
 
     let desired_dir = (forward_xz * input.y + right_xz * input.x).normalize_or_zero();
-    forces.apply_linear_acceleration(desired_dir * VEHICLE_ACCEL);
+    forces.apply_linear_impulse(mass.0*dt*desired_dir * VEHICLE_ACCEL);
     let linear_vel = forces.linear_velocity();
     let current_velocity = linear_vel.length();
     if current_velocity > MAX_VEHICLE_VELOCITY {
         let brake_force = linear_vel.normalize() * (current_velocity - MAX_VEHICLE_VELOCITY) * 50.0;
-        forces.apply_linear_acceleration(-brake_force);
+        forces.apply_linear_impulse(mass.0*dt*-brake_force);
     } else if input == Vec2::ZERO {
-        forces.apply_linear_acceleration(-linear_vel * 10.0);
+        forces.apply_linear_impulse(mass.0*dt*-linear_vel * 10.0);
     }
 
     if keyboard.pressed(KeyCode::KeyQ) {
