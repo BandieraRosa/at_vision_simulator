@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use avian3d::prelude::{CollisionEventsEnabled, CollisionStart};
-use bevy::color::palettes::css::CRIMSON;
-use bevy::prelude::{default, Gizmo, GizmoAsset, GizmoLineConfig, Isometry3d};
+use bevy::prelude::GizmoAsset;
 use bevy::{
     app::Update,
     asset::{AssetId, Assets, Handle},
@@ -572,25 +571,27 @@ fn build_targets(
         let completed = name_map.remove(completed);
 
         let logical_index = targets.len();
+        /*
         let mut gizmo = GizmoAsset::new();
         gizmo
             .sphere(Isometry3d::IDENTITY, 0.15, CRIMSON)
             .resolution(30_000 / 3);
         let handle = param.gizmo_assets.add(gizmo);
+        */
         for entity in [deactivated, activating, activated] {
             if let Some(entity) = entity {
                 insert_all_child(&mut param.commands, entity, &mut param.children, || {
                     (
                         RuneIndex(logical_index, face_entity),
                         CollisionEventsEnabled,
-                        Gizmo {
+                        /*Gizmo {
                             handle: handle.clone(),
                             line_config: GizmoLineConfig {
                                 width: 2.,
                                 ..default()
                             },
                             ..default()
-                        },
+                        },*/
                     )
                 });
             }
