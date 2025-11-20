@@ -208,7 +208,7 @@ pub struct CaptureConfig {
 struct CpuImageTarget(Handle<Image>);
 
 #[derive(Component)]
-struct CaptureCamera;
+pub struct CaptureCamera;
 
 fn setup_capture_scene(
     mut commands: Commands,

@@ -153,16 +153,15 @@ fn capture_rune(
         transform_stamped,
         map_hdr.clone(),
         "odom",
-        infantry.translation(),
-        infantry.rotation()
+        gimbal.translation(),
+        gimbal.rotation()
     );
-    let gimbal_rel = gimbal.reparented_to(infantry.into_inner());
     add_tf_frame!(
         transform_stamped,
         odom_hdr.clone(),
         "gimbal_link",
-        gimbal_rel.translation,
-        gimbal_rel.rotation
+        Vec3::ZERO,
+        Quat::IDENTITY
     );
     let cam_rel = cam_transform.reparented_to(gimbal.into_inner());
     add_tf_frame!(
@@ -227,7 +226,7 @@ fn capture_frame(
     let (cam_transform, perspective) = camera.into_inner();
     let eg = ev.time.duration_since(UNIX_EPOCH.into()).unwrap();
     let optical_frame_hdr = Header {
-        stamp: r2r::builtin_interfaces::msg::Time{
+        stamp: r2r::builtin_interfaces::msg::Time {
             sec: eg.as_secs() as i32,
             nanosec: eg.subsec_nanos(),
         },

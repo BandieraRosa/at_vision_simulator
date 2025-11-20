@@ -3,6 +3,7 @@ mod robomaster;
 mod ros2;
 mod statistic;
 mod util;
+mod dataset;
 
 use crate::ros2::plugin::ROS2Plugin;
 use crate::{

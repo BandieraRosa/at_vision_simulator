@@ -1,4 +1,3 @@
-mod capture;
-mod dataset;
+pub mod capture;
 pub mod plugin;
 mod topic;

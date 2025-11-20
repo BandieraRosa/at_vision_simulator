@@ -12,13 +12,13 @@ pub struct ArmorEntry {
     pub points: [Vec2; 4],
 }
 
-pub struct DataSetWriter {
+pub struct DatasetWriter {
     image_dir: PathBuf,
     label_dir: PathBuf,
     seq: u64,
 }
 
-impl DataSetWriter {
+impl DatasetWriter {
     pub fn new(directory: &str) -> std::io::Result<Self> {
         let base = Path::new(directory);
         let image_dir = base.join("images");
