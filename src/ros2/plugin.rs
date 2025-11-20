@@ -154,14 +154,14 @@ fn capture_rune(
         map_hdr.clone(),
         "odom",
         gimbal.translation(),
-        gimbal.rotation()
+        Quat::IDENTITY
     );
     add_tf_frame!(
         transform_stamped,
         odom_hdr.clone(),
         "gimbal_link",
         Vec3::ZERO,
-        Quat::IDENTITY
+        gimbal.rotation()
     );
     let cam_rel = cam_transform.reparented_to(gimbal.into_inner());
     add_tf_frame!(
