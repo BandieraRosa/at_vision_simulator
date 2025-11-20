@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use avian3d::prelude::{CollisionEventsEnabled, CollisionStart};
+use avian3d::prelude::{CollisionEnd, CollisionEventsEnabled};
 use bevy::prelude::GizmoAsset;
 use bevy::{
     app::Update,
@@ -733,19 +733,34 @@ pub struct RuneHit {
 }
 
 fn handle_rune_collision(
-    event: On<CollisionStart>,
+    event: On<CollisionEnd>,
     mut commands: Commands,
     mut runes: Query<&mut PowerRune>,
     targets: Query<&RuneIndex>,
+    name: Query<&Name>,
     projectiles: Query<(), With<Projectile>>,
     mut param: PowerRuneParam,
 ) {
+    println!(
+        "{:?} {:?} {:?} {:?} {:?} {:?}",
+        event.collider1,
+        name.get(event.collider1),
+        name.get(event.body1.unwrap()),
+        event.collider2,
+        name.get(event.collider2),
+        name.get(event.body2.unwrap())
+    );
     let Ok(&RuneIndex(index, rune_ent)) = targets.get(event.collider2) else {
         return;
     };
     let other = event.collider1;
     if !projectiles.contains(other) {
         return;
+    }
+    if let Some(body) = event.body2 {
+        if targets.get(body).is_err() {
+            return;
+        };
     }
     if let Ok(mut rune) = runes.get_mut(rune_ent) {
         let mut rng = rand::rng();

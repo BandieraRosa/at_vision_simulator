@@ -4,6 +4,7 @@ mod ros2;
 mod statistic;
 mod util;
 
+use crate::ros2::plugin::ROS2Plugin;
 use crate::{
     handler::{on_activate, on_hit},
     robomaster::power_rune::{PowerRunePlugin, PowerRuneRoot, Projectile},
@@ -25,7 +26,7 @@ use bevy::{
 };
 use bevy_inspector_egui::bevy_egui::{EguiGlobalSettings, PrimaryEguiContext};
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Component)]
 struct MainCamera {
@@ -161,7 +162,9 @@ fn main() {
 }
 
 #[derive(Component)]
-struct PreciousCollision(String, CollisionLayers);
+struct PreciousCollision(
+    HashMap<String, (ColliderConstructorHierarchy, CollisionLayers, Visibility)>,
+);
 
 fn setup(
     mut commands: Commands,
@@ -180,21 +183,35 @@ fn setup(
         Transform::from_xyz(0.0, 4.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
+    let layer_env = CollisionLayers::new(
+        [GameLayer::Environment],
+        [
+            GameLayer::Default,
+            GameLayer::Vehicle,
+            GameLayer::ProjectileSelf,
+            GameLayer::ProjectileOther,
+        ],
+    );
+
+    let trimesh = ColliderConstructorHierarchy::new(
+        ColliderConstructor::TrimeshFromMeshWithConfig(TrimeshFlags::all()),
+    );
+    let voxel = |size| {
+        ColliderConstructorHierarchy::new(ColliderConstructor::VoxelizedTrimeshFromMesh {
+            voxel_size: size,
+            fill_mode: FillMode::FloodFill {
+                detect_cavities: true,
+            },
+        })
+    };
+
     commands.spawn((
         SceneRoot(asset_server.load("GROUND_DISPLAY.glb#Scene0")),
         Transform::IDENTITY,
-        PreciousCollision(
+        PreciousCollision(HashMap::from([(
             "GROUND_LOW".to_string(),
-            CollisionLayers::new(
-                [GameLayer::Environment],
-                [
-                    GameLayer::Default,
-                    GameLayer::Vehicle,
-                    GameLayer::ProjectileSelf,
-                    GameLayer::ProjectileOther,
-                ],
-            ),
-        ),
+            (trimesh.clone(), layer_env, Visibility::Hidden),
+        )])),
     ));
     commands.spawn((
         SceneRoot(asset_server.load("CALIB.glb#Scene0")),
@@ -203,22 +220,29 @@ fn setup(
             .with_translation(Vec3::new(1.0, 0.5, 1.0)),
     ));
 
+    let mut power_rune_col = HashMap::from([]);
+    for i in 1..=2 {
+        /*power_rune_col.insert(
+            format!("FACE_{}", i).to_string(),
+            (trimesh.clone(), layer_env, Visibility::Visible),
+        );*/
+        for j in 1..=5 {
+            for k in ["ACTIVATED", "ACTIVE", "COMPLETED", "DISABLED"] {
+                power_rune_col.insert(
+                    format!("FACE_{}_TARGET_{}_{}", i, j, k).to_string(),
+                    (trimesh.clone(), layer_env, Visibility::Visible),
+                );
+            }
+        }
+    }
     commands.spawn((
         RigidBody::Static,
         CollisionMargin(0.01),
         Restitution::ZERO,
-        CollisionLayers::new(
-            [GameLayer::Environment],
-            [
-                GameLayer::Default,
-                GameLayer::Vehicle,
-                GameLayer::ProjectileSelf,
-                GameLayer::ProjectileOther,
-            ],
-        ),
         SceneRoot(asset_server.load("POWER.glb#Scene0")),
         Transform::IDENTITY,
         PowerRuneRoot,
+        PreciousCollision(power_rune_col),
     ));
 
     commands.spawn((
@@ -421,7 +445,7 @@ fn projectile_launch(
             Collider::sphere(44.5 * 0.001 / 2.0),
             Mass(44.5 * 0.001),
             Friction::new(1.1),
-            Restitution::new(0.00005),
+            Restitution::ZERO,
             LinearDamping(0.05),
             CollisionLayers::new(
                 GameLayer::ProjectileSelf,
@@ -450,37 +474,31 @@ fn setup_collision(
     events: On<SceneInstanceReady>,
     mut commands: Commands,
     children: Query<&Children>,
-    name: Query<&Name>,
-    root_query: Query<
-        (Entity, &PreciousCollision),
-        (
-            Without<Collider>,
-            Without<ColliderConstructorHierarchy>,
-            With<PreciousCollision>,
-        ),
-    >,
+    name: Query<&Name, With<Children>>,
+    root_query: Query<(Entity, &PreciousCollision)>,
 ) {
-    if let Ok((_, PreciousCollision(collider, layer))) = root_query.get(events.entity) {
-        for e in children.iter_descendants(events.entity) {
-            if let Ok(name) = name.get(e) {
-                if name.to_string() == *collider {
-                    println!("{}", name);
-                    commands.entity(e).insert((
-                        ColliderConstructorHierarchy::new(
-                            ColliderConstructor::TrimeshFromMeshWithConfig(
-                                TrimeshFlags::all(),
-                            ),
-                        ),
-                        Visibility::Hidden,
-                        RigidBody::Static,
-                        CollisionMargin(0.02),
-                        Restitution::ZERO,
-                        layer.clone(),
-                    ));
-                }
+    let Ok((_, PreciousCollision(map))) = root_query.get(events.entity) else {
+        return;
+    };
+    for e in children.iter_descendants(events.entity) {
+        let Ok(name) = name.get(e) else {
+            continue;
+        };
+        if let Some((constructor, layer, visibility)) = map.get(&name.to_string()) {
+            println!("{}", name);
+            commands.entity(e).insert((
+                RigidBody::Static,
+                Restitution::ZERO,
+                constructor.clone(),
+                CollisionMargin(0.02),
+                layer.clone(),
+            ));
+            if visibility == Visibility::Hidden {
+                commands.entity(e).insert(visibility.clone());
             }
         }
     }
+    commands.entity(events.entity).remove::<PreciousCollision>();
 }
 
 // 单位 m/s^2
