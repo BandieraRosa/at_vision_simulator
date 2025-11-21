@@ -1,11 +1,13 @@
+mod dataset;
 mod handler;
 mod robomaster;
 mod ros2;
 mod statistic;
 mod util;
-mod dataset;
 
+use crate::dataset::prelude::DatasetPlugin;
 use crate::ros2::plugin::ROS2Plugin;
+use crate::util::bevy::insert_all_child;
 use crate::{
     handler::{on_activate, on_hit},
     robomaster::power_rune::{PowerRunePlugin, PowerRuneRoot, Projectile},
@@ -131,6 +133,7 @@ fn main() {
             FrameTimeDiagnosticsPlugin::default(),
             LogDiagnosticsPlugin::default(),
         ))
+        .add_plugins(DatasetPlugin)
         .insert_resource(CameraMode(FollowingType::Robot))
         .insert_resource(Gravity(Vec3::NEG_Y * 9.81))
         .insert_resource(SubstepCount(20))
@@ -317,9 +320,13 @@ fn setup(
     ));
 }
 
+#[derive(Component, Clone)]
+pub struct Armor(String);
+
 fn setup_vehicle(
     events: On<SceneInstanceReady>,
     mut commands: Commands,
+    children: Query<&Children>,
     root_query: Query<(Entity, Option<&LocalInfantry>), With<InfantryRoot>>,
     secondary_query: Query<&ChildOf, (Without<InfantryRoot>, Without<SceneInstance>)>,
     node_query: Query<
@@ -355,8 +362,11 @@ fn setup_vehicle(
                                 continue;
                             }
                             println!("{}", name);
-                            if name.starts_with("ARMOR_") && name.len() == 7 {
+                            if name.starts_with("ARMOR_") && name.ends_with("_P") {
                                 println!("{}", name);
+                                insert_all_child(&mut commands, e, &children, || {
+                                    Armor(name.to_string())
+                                });
                                 commands.entity(e).insert(ColliderConstructorHierarchy::new(
                                     ColliderConstructor::TrimeshFromMeshWithConfig(
                                         TrimeshFlags::MERGE_DUPLICATE_VERTICES,

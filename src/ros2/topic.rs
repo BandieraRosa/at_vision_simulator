@@ -16,7 +16,7 @@ pub struct TopicPublisher<T: RosTopic> {
 }
 
 impl<T: RosTopic> TopicPublisher<T> {
-    pub fn new(sender: SyncSender<T::T>, freq: f64) -> Self {
+    pub(crate) fn new(sender: SyncSender<T::T>, freq: f64) -> Self {
         let interval = Duration::from_secs_f64(1.0 / freq);
         TopicPublisher {
             sender,

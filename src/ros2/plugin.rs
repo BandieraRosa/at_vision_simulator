@@ -1,3 +1,4 @@
+use crate::dataset::prelude::ArmorOnScreen;
 use crate::ros2::capture::{CaptureConfig, Captured, RosCapturePlugin};
 use crate::ros2::topic::*;
 use crate::{
@@ -23,14 +24,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-const M_ALIGN_MAT3: Mat3 = Mat3::from_cols(
+pub const M_ALIGN_MAT3: Mat3 = Mat3::from_cols(
     Vec3::new(0.0, -1.0, 0.0), // M[0,0], M[1,0], M[2,0]
     Vec3::new(0.0, 0.0, 1.0),  // M[0,1], M[1,1], M[2,1]
     Vec3::new(-1.0, 0.0, 0.0), // M[0,2], M[1,2], M[2,2]
 );
 
 #[inline]
-fn transform(bevy_transform: Transform) -> ::r2r::geometry_msgs::msg::Transform {
+pub fn transform(bevy_transform: Transform) -> ::r2r::geometry_msgs::msg::Transform {
     let align_rot_mat = M_ALIGN_MAT3;
     let align_quat = Quat::from_mat3(&align_rot_mat);
     let new_rotation = align_quat * bevy_transform.rotation * align_quat.inverse();
@@ -68,12 +69,13 @@ pub struct MainCamera;
 #[derive(Resource)]
 pub struct RoboMasterClock(pub Arc<Mutex<Clock>>);
 
+#[macro_export]
 macro_rules! add_tf_frame {
     ($ls:ident, $hdr:expr, $id:expr, $translation:expr, $rotation:expr) => {
         $ls.push(::r2r::geometry_msgs::msg::TransformStamped {
             header: $hdr.clone(),
             child_frame_id: $id.to_string(),
-            transform: transform(
+            transform: crate::ros2::plugin::transform(
                 Transform::IDENTITY
                     .with_translation($translation)
                     .with_rotation($rotation),
@@ -84,11 +86,12 @@ macro_rules! add_tf_frame {
         $ls.push(::r2r::geometry_msgs::msg::TransformStamped {
             header: $hdr.clone(),
             child_frame_id: $id.to_string(),
-            transform: transform($transform),
+            transform: crate::ros2::plugin::transform($transform),
         });
     };
 }
 
+#[macro_export]
 macro_rules! pose {
     ($hdr:expr) => {
         PoseStamped {
@@ -222,6 +225,7 @@ fn capture_frame(
     mut camera_info_pub: ResMut<TopicPublisher<CameraInfoTopic>>,
     mut image_raw_pub: ResMut<TopicPublisher<ImageRawTopic>>,
     mut image_compressed_pub: ResMut<TopicPublisher<ImageCompressedTopic>>,
+    mut armor: Res<ArmorOnScreen>,
 ) {
     let (cam_transform, perspective) = camera.into_inner();
     let eg = ev.time.duration_since(UNIX_EPOCH.into()).unwrap();
@@ -234,18 +238,50 @@ fn capture_frame(
     };
     let img = ev.image.clone();
     //image_compressed_pub.publish(compress_image(optical_frame_hdr.clone(), &img));
-    let (camera_info, image) = compute_camera(&perspective, optical_frame_hdr.clone(), img);
+    let (camera_info, image) = compute_camera(&perspective, optical_frame_hdr.clone(), img, &armor);
     camera_info_pub.publish(camera_info);
     image_raw_pub.publish(image);
+}
+
+fn draw_circle_point(img: &mut bevy::prelude::Image, x: u32, y: u32, radius: u32, color: Color) {
+    let width = img.width();
+    let height = img.height();
+
+    let r = radius as i32;
+    let cx = x as i32;
+    let cy = y as i32;
+    let r2 = r * r;
+
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx*dx + dy*dy <= r2 {
+                let px = cx + dx;
+                let py = cy + dy;
+
+                if px >= 0 && py >= 0 && px < width as i32 && py < height as i32 {
+                    img.set_color_at(px as u32, py as u32, color).unwrap();
+                }
+            }
+        }
+    }
 }
 
 fn compute_camera(
     perspective: &Projection,
     hdr: Header,
-    img: bevy::image::Image,
+    mut img: bevy::prelude::Image,
+    armor: &ArmorOnScreen,
 ) -> (CameraInfo, Image) {
+    for (k, armors) in armor.iter() {
+        for (armor_name, pos) in armors {
+            for &(x, y) in pos {
+                draw_circle_point(&mut img, x, y, 5, Color::srgb(1.0, 0.0, 0.0));
+            }
+        }
+    }
     let dyn_img = img.try_into_dynamic().unwrap();
     let rgb8 = dyn_img.to_rgb8();
+
     let (width, height) = (rgb8.width(), rgb8.height());
 
     let (fov_y, fov_x) = match perspective {

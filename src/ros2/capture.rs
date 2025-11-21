@@ -22,7 +22,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
 #[derive(Resource, Deref)]
 struct MainWorldReceiver(Receiver<(Vec<u8>, SystemTime)>);
