@@ -3,6 +3,7 @@ use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Exposure;
 use bevy::post_process::bloom::Bloom;
 use bevy::render::view::Hdr;
+use bevy::tasks::AsyncComputeTaskPool;
 use bevy::{
     image::TextureFormatPixelInfo,
     prelude::*,
@@ -29,7 +30,7 @@ use std::time::SystemTime;
 struct MainWorldReceiver(Receiver<(Vec<u8>, SystemTime)>);
 
 #[derive(Resource, Deref)]
-struct RenderWorldSender(Sender<(Vec<u8>, SystemTime)>);
+struct RenderWorldSender(Arc<Sender<(Vec<u8>, SystemTime)>>);
 
 pub struct ImageCopyPlugin;
 impl Plugin for ImageCopyPlugin {
@@ -45,7 +46,7 @@ impl Plugin for ImageCopyPlugin {
         graph.add_node_edge(bevy::render::graph::CameraDriverLabel, ImageCopy);
 
         render_app
-            .insert_resource(RenderWorldSender(s))
+            .insert_resource(RenderWorldSender(Arc::new(s)))
             .add_systems(ExtractSchedule, image_copy_extract)
             .add_systems(
                 Render,
@@ -61,6 +62,7 @@ struct ImageCopiers(pub Vec<ImageCopier>);
 struct ImageCopier {
     buffer: Buffer,
     count: Arc<Mutex<u32>>,
+    copying: Arc<AtomicBool>,
     enabled: Arc<AtomicBool>,
     src_image: Handle<Image>,
 }
@@ -83,6 +85,7 @@ impl ImageCopier {
         ImageCopier {
             buffer: cpu_buffer,
             src_image,
+            copying: Arc::new(AtomicBool::new(false)),
             enabled: Arc::new(AtomicBool::new(true)),
             count: Arc::new(Mutex::new(0)),
         }
@@ -164,21 +167,34 @@ fn receive_image_from_buffer(
             continue;
         }
 
-        let buffer_slice = image_copier.buffer.slice(..);
-        let (s, r) = crossbeam_channel::bounded(1);
+        if image_copier
+            .copying
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            let sender = sender.clone();
+            let render_device = render_device.clone();
+            let image_copier = image_copier.clone();
+            let _ = AsyncComputeTaskPool::get().spawn(async move {
+                let buffer_slice = image_copier.buffer.slice(..);
+                let (s, r) = crossbeam_channel::bounded(1);
 
-        buffer_slice.map_async(MapMode::Read, move |r| match r {
-            Ok(r) => s.send(r).expect("Failed to send map update"),
-            Err(err) => panic!("Failed to map buffer {err}"),
-        });
+                buffer_slice.map_async(MapMode::Read, move |r| match r {
+                    Ok(r) => s.send(r).expect("Failed to send map update"),
+                    Err(err) => panic!("Failed to map buffer {err}"),
+                });
 
-        render_device
-            .poll(PollType::Wait)
-            .expect("Failed to poll device for map async");
-        r.recv().expect("Failed to receive the map_async message");
+                render_device
+                    .poll(PollType::Wait)
+                    .expect("Failed to poll device for map async");
+                r.recv().expect("Failed to receive the map_async message");
 
-        let _ = sender.try_send((buffer_slice.get_mapped_range().to_vec(), SystemTime::now()));
-        image_copier.buffer.unmap();
+                sender
+                    .send((buffer_slice.get_mapped_range().to_vec(), SystemTime::now()))
+                    .expect("Failed to send buffer_slice");
+                image_copier.buffer.unmap();
+            });
+        }
     }
 }
 
