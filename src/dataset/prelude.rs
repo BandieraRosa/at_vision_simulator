@@ -150,6 +150,7 @@ fn query(
     mut armor_screen: ResMut<ArmorOnScreen>,
     mut tf_pub: ResMut<TopicPublisher<GlobalTransformTopic>>,
     ass: Res<Assets<Mesh>>,
+    mut m: MeshRayCast,
 ) {
     armor_screen.clear();
     let (projection, camera_global_transform) = camera.into_inner();
@@ -165,6 +166,8 @@ fn query(
                 let corners: Vec<_> = corners
                     .into_iter()
                     .filter_map(|corner| {
+                        let dir = corner - camera_global_transform.translation();
+
                         world_to_screen(corner, camera_global_transform, projection, &config)
                     })
                     .collect();

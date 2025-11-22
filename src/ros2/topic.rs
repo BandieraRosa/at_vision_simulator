@@ -1,4 +1,4 @@
-use bevy::prelude::Resource;
+use bevy::prelude::{error, Resource};
 use r2r::geometry_msgs::msg::PoseStamped;
 use r2r::qos::{DurabilityPolicy, HistoryPolicy, LivelinessPolicy, ReliabilityPolicy};
 use r2r::sensor_msgs::msg::{CameraInfo, CompressedImage, Image};
@@ -30,7 +30,9 @@ impl<T: RosTopic> TopicPublisher<T> {
         let now = Instant::now();
         let ideal_time = self.start + self.interval * self.count;
         if now >= ideal_time {
-            self.sender.send(message).unwrap();
+            if let Err(err)=self.sender.try_send(message){
+                error!("Topic send error {:?}", err);
+            }
             self.count += 1;
             if self.count > 1 << 30 {
                 self.count = 0;

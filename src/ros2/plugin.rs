@@ -399,7 +399,7 @@ impl Plugin for ROS2Plugin {
             .add_systems(Update, capture_rune.after(TransformSystems::Propagate))
             .insert_resource(SpinThreadHandle(Some(thread::spawn(move || {
                 while !signal_arc.load(Ordering::Acquire) {
-                    node.spin_once(Duration::from_millis(10));
+                    node.spin_once(Duration::from_millis(100));
                 }
             }))));
     }

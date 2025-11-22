@@ -18,9 +18,10 @@ use bevy::{
     },
 };
 use crossbeam_channel::{Receiver, Sender};
+use std::ops::Add;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+    atomic::{AtomicBool, Ordering}, Arc,
+    Mutex,
 };
 use std::time::SystemTime;
 
@@ -59,6 +60,7 @@ struct ImageCopiers(pub Vec<ImageCopier>);
 #[derive(Clone, Component)]
 struct ImageCopier {
     buffer: Buffer,
+    count: Arc<Mutex<u32>>,
     enabled: Arc<AtomicBool>,
     src_image: Handle<Image>,
 }
@@ -82,6 +84,7 @@ impl ImageCopier {
             buffer: cpu_buffer,
             src_image,
             enabled: Arc::new(AtomicBool::new(true)),
+            count: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -118,7 +121,6 @@ impl render_graph::Node for ImageCopyDriver {
             if !image_copier.enabled() {
                 continue;
             }
-
             let src_image = gpu_images.get(&image_copier.src_image).unwrap();
             let mut encoder = render_context
                 .render_device()
@@ -175,7 +177,7 @@ fn receive_image_from_buffer(
             .expect("Failed to poll device for map async");
         r.recv().expect("Failed to receive the map_async message");
 
-        let _ = sender.send((buffer_slice.get_mapped_range().to_vec(), SystemTime::now()));
+        let _ = sender.try_send((buffer_slice.get_mapped_range().to_vec(), SystemTime::now()));
         image_copier.buffer.unmap();
     }
 }
