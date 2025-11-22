@@ -1,11 +1,9 @@
 use bevy::prelude::Resource;
 use r2r::geometry_msgs::msg::PoseStamped;
-use r2r::qos::{DurabilityPolicy, HistoryPolicy, LivelinessPolicy, ReliabilityPolicy};
 use r2r::sensor_msgs::msg::{CameraInfo, CompressedImage, Image};
 use r2r::tf2_msgs::msg::TFMessage;
 use r2r::{QosProfile, WrappedTypesupport};
 use std::sync::mpsc::SyncSender;
-use std::time::Duration;
 
 #[derive(Resource)]
 pub struct TopicPublisher<T: RosTopic> {
@@ -97,18 +95,6 @@ macro_rules! define_topic {
         define_topic!($topic, $typ, $url, ::r2r::QosProfile::default());
     };
 }
-
-const SENSOR_QOS: QosProfile = QosProfile {
-    history: HistoryPolicy::KeepLast,
-    depth: 10,
-    reliability: ReliabilityPolicy::BestEffort,
-    durability: DurabilityPolicy::Volatile,
-    deadline: Duration::ZERO,
-    lifespan: Duration::ZERO,
-    liveliness: LivelinessPolicy::Automatic,
-    liveliness_lease_duration: Duration::ZERO,
-    avoid_ros_namespace_conventions: false,
-};
 
 define_topic!(CameraInfoTopic, CameraInfo, "/camera_info");
 define_topic!(ImageRawTopic, Image, "/image_raw");

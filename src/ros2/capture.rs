@@ -27,6 +27,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering}, Arc,
     Mutex,
 };
+use std::time::Duration;
 
 #[derive(Resource, Clone)]
 pub struct CaptureConfig {
@@ -139,11 +140,18 @@ impl render_graph::Node for ImageCopyDriver {
 }
 
 fn receive_image_from_buffer(
+    t: Res<Time>,
+    mut r: ResMut<RateLimiter>,
     image_copiers: Res<ImageCopiers>,
     render_device: Res<RenderDevice>,
     config: Res<CaptureConfig>,
     ctx: Res<RosCaptureContext>,
 ) {
+    r.tick(t.delta());
+    if !r.is_finished() {
+        return;
+    }
+    r.reset();
     let ctx = Arc::new(ctx.clone());
     let config = Arc::new(config.clone());
     let (width, height, texture_format) = (config.width, config.height, config.texture_format);
@@ -202,7 +210,12 @@ fn receive_image_from_buffer(
                         ),
                         frame_id: "camera_optical_frame".to_string(),
                     };
-                    //image_compressed_pub.publish(compress_image(optical_frame_hdr.clone(), &img));
+                    /*ctx.image_compressed.publish(compress_image(
+                        optical_frame_hdr.clone(),
+                        width,
+                        height,
+                        image_data.clone(),
+                    ));*/
                     let (camera_info, image) = compute_camera(
                         config.fov_y,
                         optical_frame_hdr,
@@ -212,7 +225,6 @@ fn receive_image_from_buffer(
                     );
                     ctx.camera_info.publish(camera_info);
                     ctx.image_raw.publish(image);
-                   // ctx.image_compressed.publish(compressed);
                 })
                 .detach();
         }
@@ -232,6 +244,9 @@ pub struct RosCapturePlugin {
     pub context: RosCaptureContext,
 }
 
+#[derive(Resource, Deref, DerefMut)]
+struct RateLimiter(Timer);
+
 impl Plugin for RosCapturePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config.clone())
@@ -247,6 +262,10 @@ impl Plugin for RosCapturePlugin {
             .insert_resource(self.config.clone())
             .insert_resource(self.context.clone())
             .add_systems(ExtractSchedule, image_copy_extract)
+            .insert_resource(RateLimiter(Timer::new(
+                Duration::from_secs_f64(1.0 / 60.0),
+                TimerMode::Once,
+            )))
             .add_systems(
                 Render,
                 receive_image_from_buffer.after(RenderSystems::Render),
