@@ -23,7 +23,7 @@ pub fn on_activate(
         return;
     };
     commands.spawn(AudioPlayer::new(asset_server.load(
-        "embedded://bevy_robomaster_simulator/assets/rune_activated.ogg",
+        "embedded://daedalus/assets/rune_activated.ogg",
     )));
 }
 
@@ -39,7 +39,7 @@ pub fn on_hit(
     if ev.result.accurate {
         increase_accurate();
         commands.spawn(AudioPlayer::new(asset_server.load(
-            "embedded://bevy_robomaster_simulator/assets/projectile_launch.ogg",
+            "embedded://daedalus/assets/projectile_launch.ogg",
         )));
     }
 }

@@ -213,7 +213,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         SceneRoot(
             asset_server
-                .load("embedded://bevy_robomaster_simulator/assets/GROUND_DISPLAY.glb#Scene0"),
+                .load("embedded://daedalus/assets/GROUND_DISPLAY.glb#Scene0"),
         ),
         Transform::IDENTITY,
         PreciousCollision(HashMap::from([(
@@ -242,7 +242,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         CollisionMargin(0.001),
         Restitution::ZERO,
         SceneRoot(
-            asset_server.load("embedded://bevy_robomaster_simulator/assets/POWER.glb#Scene0"),
+            asset_server.load("embedded://daedalus/assets/POWER.glb#Scene0"),
         ),
         Transform::IDENTITY,
         PowerRuneRoot,
@@ -269,7 +269,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         AngularDamping(109.8),
         LockedAxes::new().lock_rotation_x().lock_rotation_z(),
         SceneRoot(
-            asset_server.load("embedded://bevy_robomaster_simulator/assets/vehicle.glb#Scene0"),
+            asset_server.load("embedded://daedalus/assets/vehicle.glb#Scene0"),
         ),
         Transform::from_xyz(0.0, 1.0, 0.0),
         InfantryRoot,
@@ -295,7 +295,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         AngularDamping(109.8),
         LockedAxes::new().lock_rotation_x().lock_rotation_z(),
         SceneRoot(
-            asset_server.load("embedded://bevy_robomaster_simulator/assets/vehicle.glb#Scene0"),
+            asset_server.load("embedded://daedalus/assets/vehicle.glb#Scene0"),
         ),
         Transform::from_xyz(1.0, 1.0, 1.0),
         InfantryRoot,
