@@ -14,21 +14,18 @@ use crate::{
     statistic::{accurate_count, accurate_pct, increase_launch, launch_count},
 };
 use avian3d::prelude::*;
+use bevy::asset::embedded_asset;
 use bevy::camera::Exposure;
-use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::light::light_consts::lux;
-use bevy::post_process::bloom::Bloom;
-use bevy::render::view::screenshot::{save_to_disk, Capturing, Screenshot};
+use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
 use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
+use bevy::winit::WinitWindows;
 use bevy::{
     anti_alias::fxaa::Fxaa,
     input::mouse::MouseMotion,
     prelude::*,
-    render::view::Hdr,
     scene::{SceneInstance, SceneInstanceReady},
 };
-use bevy_inspector_egui::bevy_egui::{EguiGlobalSettings, PrimaryEguiContext};
-use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Component)]
@@ -85,7 +82,7 @@ struct Cooldown(Timer);
 /// Creates help text at the bottom of the screen.
 fn create_help_text() -> Text {
     format!(
-        "total={} accurate={} pct={}\nControls: F2-Screenshot F3-Change Camera | WASD-Move Mouse-Look Space-Shoot",
+        "total={} accurate={} pct={}\nControls: F2-Screenshot F3-Change Camera | WASD-Move Mouse-Look Space-Shoot\n2025 Actor&Thinker",
         launch_count(),
         accurate_count(),
         accurate_pct()
@@ -112,27 +109,36 @@ fn update_help_text(mut text: Query<&mut Text>) {
     }
 }
 
+struct EmbeddedAssetPlugin;
+
+impl Plugin for EmbeddedAssetPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "assets/GROUND_DISPLAY.glb");
+        embedded_asset!(app, "assets/POWER.glb");
+        embedded_asset!(app, "assets/projectile_launch.ogg");
+        embedded_asset!(app, "assets/rune_activated.ogg");
+        embedded_asset!(app, "assets/vehicle.glb");
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     present_mode: PresentMode::AutoVsync,
+                    name: Some("RoboMaster Simulator | Actor&Thinker".to_string()),
+                    title: "RoboMaster Simulator | Actor&Thinker".to_string(),
                     fit_canvas_to_parent: true,
                     ..default()
                 }),
                 ..default()
             }),
+            EmbeddedAssetPlugin,
             PhysicsPlugins::default(),
         ))
         .add_plugins(ROS2Plugin::default())
-        .add_plugins((EguiPlugin::default(), WorldInspectorPlugin::new()))
-        //.add_plugins(PhysicsDebugPlugin::default())
         .add_plugins(PowerRunePlugin)
-        .add_plugins((
-            FrameTimeDiagnosticsPlugin::default(),
-            LogDiagnosticsPlugin::default(),
-        ))
         .add_plugins(DatasetPlugin)
         .insert_resource(CameraMode(FollowingType::Robot))
         .insert_resource(Gravity(Vec3::NEG_Y * 9.81))
@@ -170,12 +176,7 @@ struct PreciousCollision(
     HashMap<String, (ColliderConstructorHierarchy, CollisionLayers, Visibility)>,
 );
 
-fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut egui_global_settings: ResMut<EguiGlobalSettings>,
-) {
-    egui_global_settings.auto_create_primary_context = false;
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     spawn_text(&mut commands);
     commands.spawn((
         DirectionalLight {
@@ -210,18 +211,15 @@ fn setup(
     };
 
     commands.spawn((
-        SceneRoot(asset_server.load("GROUND_DISPLAY.glb#Scene0")),
+        SceneRoot(
+            asset_server
+                .load("embedded://bevy_robomaster_simulator/assets/GROUND_DISPLAY.glb#Scene0"),
+        ),
         Transform::IDENTITY,
         PreciousCollision(HashMap::from([(
             "GROUND_LOW".to_string(),
             (trimesh.clone(), layer_env, Visibility::Hidden),
         )])),
-    ));
-    commands.spawn((
-        SceneRoot(asset_server.load("CALIB.glb#Scene0")),
-        Transform::IDENTITY
-            .with_scale(Vec3::splat(1.0))
-            .with_translation(Vec3::new(1.0, 0.5, 1.0)),
     ));
 
     let mut power_rune_col = HashMap::from([]);
@@ -241,9 +239,11 @@ fn setup(
     }
     commands.spawn((
         RigidBody::Static,
-        CollisionMargin(0.01),
+        CollisionMargin(0.001),
         Restitution::ZERO,
-        SceneRoot(asset_server.load("POWER.glb#Scene0")),
+        SceneRoot(
+            asset_server.load("embedded://bevy_robomaster_simulator/assets/POWER.glb#Scene0"),
+        ),
         Transform::IDENTITY,
         PowerRuneRoot,
         PreciousCollision(power_rune_col),
@@ -252,7 +252,7 @@ fn setup(
     commands.spawn((
         RigidBody::Dynamic,
         Collider::cylinder(0.2593615, 0.433951),
-        CollisionMargin(0.01),
+        CollisionMargin(0.001),
         CollisionLayers::new(
             GameLayer::Vehicle,
             [
@@ -268,7 +268,9 @@ fn setup(
         LinearDamping(0.0),
         AngularDamping(109.8),
         LockedAxes::new().lock_rotation_x().lock_rotation_z(),
-        SceneRoot(asset_server.load("vehicle.glb#Scene0")),
+        SceneRoot(
+            asset_server.load("embedded://bevy_robomaster_simulator/assets/vehicle.glb#Scene0"),
+        ),
         Transform::from_xyz(0.0, 1.0, 0.0),
         InfantryRoot,
         LocalInfantry,
@@ -292,16 +294,16 @@ fn setup(
         LinearDamping(0.0),
         AngularDamping(109.8),
         LockedAxes::new().lock_rotation_x().lock_rotation_z(),
-        SceneRoot(asset_server.load("vehicle.glb#Scene0")),
+        SceneRoot(
+            asset_server.load("embedded://bevy_robomaster_simulator/assets/vehicle.glb#Scene0"),
+        ),
         Transform::from_xyz(1.0, 1.0, 1.0),
         InfantryRoot,
     ));
 
     commands.spawn((
         Camera3d::default(),
-        Bloom::NATURAL,
         Camera::default(),
-        PrimaryEguiContext,
         Projection::Perspective(PerspectiveProjection {
             fov: std::f32::consts::PI / 180.0 * 45.0,
             near: 0.1,
@@ -311,7 +313,6 @@ fn setup(
         Exposure::SUNLIGHT,
         Msaa::Off,
         Fxaa::default(),
-        Hdr,
         Transform::from_xyz(0.0, 10.0, 15.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
         MainCamera {
             follow_offset: Vec3::new(0.0, 3.0, 2.0),
@@ -365,9 +366,7 @@ fn setup_vehicle(
                     if !set.insert(e) {
                         continue;
                     }
-                    println!("{}", name);
                     if name.starts_with("ARMOR_") && name.ends_with("_P") {
-                        println!("{}", name);
                         insert_all_child(&mut commands, e, &children, || Armor(name.to_string()));
                         commands.entity(e).insert(ColliderConstructorHierarchy::new(
                             ColliderConstructor::TrimeshFromMeshWithConfig(
@@ -496,13 +495,12 @@ fn setup_collision(
             continue;
         };
         if let Some((constructor, layer, visibility)) = map.get(&name.to_string()) {
-            println!("{}", name);
             commands.entity(e).insert((
                 RigidBody::Static,
                 Mass(0.0),
                 Restitution::ZERO,
                 constructor.clone(),
-                CollisionMargin(0.02),
+                CollisionMargin(0.001),
                 *layer,
             ));
             if visibility == Visibility::Hidden {

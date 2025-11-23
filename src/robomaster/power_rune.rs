@@ -23,7 +23,7 @@ use bevy::{
     time::{Time, Timer, TimerMode},
     transform::components::Transform,
 };
-use rand::{seq::SliceRandom, Rng};
+use rand::{Rng, seq::SliceRandom};
 
 use crate::robomaster::visibility::{Activation, Control, Controller, Param};
 use crate::util::bevy::{drain_entities_by, insert_all_child};
@@ -741,15 +741,6 @@ fn handle_rune_collision(
     projectiles: Query<(), With<Projectile>>,
     mut param: PowerRuneParam,
 ) {
-    println!(
-        "{:?} {:?} {:?} {:?} {:?} {:?}",
-        event.collider1,
-        name.get(event.collider1),
-        name.get(event.body1.unwrap()),
-        event.collider2,
-        name.get(event.collider2),
-        name.get(event.body2.unwrap())
-    );
     let Ok(&RuneIndex(index, rune_ent)) = targets.get(event.collider2) else {
         return;
     };

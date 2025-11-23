@@ -1,20 +1,20 @@
 use crate::ros2::capture::{CaptureConfig, RosCaptureContext, RosCapturePlugin};
 use crate::ros2::topic::*;
 use crate::{
-    arc_mutex, publisher, robomaster::power_rune::{PowerRune, RuneIndex}, InfantryGimbal, InfantryViewOffset,
-    LocalInfantry,
+    InfantryGimbal, InfantryViewOffset, LocalInfantry, arc_mutex, publisher,
+    robomaster::power_rune::{PowerRune, RuneIndex},
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
-use r2r::geometry_msgs::msg::{Pose, PoseStamped};
 use r2r::ClockType::SystemTime;
-use r2r::{std_msgs::msg::Header, tf2_msgs::msg::TFMessage, Clock, Context, Node};
+use r2r::geometry_msgs::msg::{Pose, PoseStamped};
+use r2r::{Clock, Context, Node, std_msgs::msg::Header, tf2_msgs::msg::TFMessage};
 use std::f32::consts::PI;
 use std::time::Duration;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering}, Arc,
-        Mutex,
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
 };
@@ -218,10 +218,10 @@ fn cleanup_ros2_system(
     if exit.read().len() > 0 {
         stop_signal.0.store(true, Ordering::Release);
         if let Some(handle) = handle_res.0.take() {
-            println!("Waiting for ROS 2 spin thread to join...");
+            info!("Waiting for ROS 2 spin thread to join...");
             match handle.join() {
-                Ok(_) => println!("ROS 2 thread successfully joined. Safe to exit."),
-                Err(_) => eprintln!("WARNING: ROS 2 thread panicked or failed to join."),
+                Ok(_) => info!("ROS 2 thread successfully joined. Safe to exit."),
+                Err(_) => error!("WARNING: ROS 2 thread panicked or failed to join."),
             }
         }
     }

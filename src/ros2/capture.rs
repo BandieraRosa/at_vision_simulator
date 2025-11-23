@@ -1,5 +1,6 @@
 use crate::ros2::plugin::MainCamera;
 use crate::ros2::topic::{CameraInfoTopic, ImageCompressedTopic, ImageRawTopic, TopicPublisher};
+use crate::util::image::compress_image;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Exposure;
 use bevy::post_process::bloom::Bloom;
@@ -9,22 +10,22 @@ use bevy::{
     image::TextureFormatPixelInfo,
     prelude::*,
     render::{
-        render_asset::RenderAssets, render_graph::{self, NodeRunError, RenderGraph, RenderGraphContext, RenderLabel}, render_resource::{
+        Extract, Render, RenderApp, RenderSystems,
+        render_asset::RenderAssets,
+        render_graph::{self, NodeRunError, RenderGraph, RenderGraphContext, RenderLabel},
+        render_resource::{
             Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, MapMode,
             PollType, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureFormat, TextureUsages,
-        }, renderer::{RenderContext, RenderDevice, RenderQueue},
-        Extract,
-        Render,
-        RenderApp,
-        RenderSystems,
+        },
+        renderer::{RenderContext, RenderDevice, RenderQueue},
     },
 };
+use r2r::Clock;
 use r2r::sensor_msgs::msg::{CameraInfo, RegionOfInterest};
 use r2r::std_msgs::msg::Header;
-use r2r::Clock;
 use std::sync::{
-    atomic::{AtomicBool, Ordering}, Arc,
-    Mutex,
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 
@@ -207,12 +208,12 @@ fn receive_image_from_buffer(
                         ),
                         frame_id: "camera_optical_frame".to_string(),
                     };
-                    /*ctx.image_compressed.publish(compress_image(
+                    ctx.image_compressed.publish(compress_image(
                         optical_frame_hdr.clone(),
                         width,
                         height,
                         image_data.clone(),
-                    ));*/
+                    ));
                     let (camera_info, image) = compute_camera(
                         config.fov_y,
                         optical_frame_hdr,
