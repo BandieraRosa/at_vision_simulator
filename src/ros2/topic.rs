@@ -90,8 +90,8 @@ macro_rules! publisher {
                             }
                             did_work = true;
                         }
-                        Err(::std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(::std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(::std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+                        Err(::std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
                     }
                 }
                 if !did_work {
@@ -171,6 +171,8 @@ macro_rules! subscriber {
     };
 }
 
+// ==================== Topic Trait ====================
+
 pub trait RosTopic {
     type T: WrappedTypesupport + 'static;
     const TOPIC: &'static str;
@@ -209,7 +211,7 @@ define_topic!(
     "/gimbal_quaternion"
 );
 
-// 弹丸速度发布
+// 弹丸速度发布 (使用 Float64)
 define_topic!(CurrentVelocityTopic, Float64, "/current_velocity");
 
 // ==================== 订阅话题定义 ====================

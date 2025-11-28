@@ -343,7 +343,7 @@ fn setup_vehicle(
 
     let mut despawn = HashSet::new();
 
-    for (node, name, &ChildOf(secondary), transform) in node_query {
+    for (node, name, &ChildOf(secondary), transform) in node_query.iter() {
         let Ok(&ChildOf(root2)) = secondary_query.get(secondary) else {
             continue;
         };
@@ -374,7 +374,7 @@ fn setup_vehicle(
                             ),
                         ));
                     }
-                    for (ee, n, &ChildOf(r), _) in node_query {
+                    for (ee, n, &ChildOf(r), _) in node_query.iter() {
                         if r == e {
                             stack.push_back((ee, n));
                         }
@@ -784,6 +784,7 @@ fn following_controls(mut mode: ResMut<CameraMode>, keyboard: Res<ButtonInput<Ke
     }
 }
 
+// ✅ 保持与正确版本完全一致的相机跟随逻辑
 fn update_camera_follow(
     camera_query: Single<(&mut Transform, &MainCamera), Without<LocalInfantry>>,
     infantry: Single<&Transform, (With<InfantryRoot>, With<LocalInfantry>)>,
@@ -792,119 +793,94 @@ fn update_camera_follow(
     mode: Res<CameraMode>,
 ) {
     let gimbal_transform = gimbal.into_inner();
-    let (mut camera_transform, main_camera) = camera_query.into_inner();
-    let infantry_transform = infantry.into_inner();
+    let (mut camera_transform, camera_offset) = camera_query.into_inner();
 
     match mode.0 {
-        FollowingType::Free => {
-            // 自由摄像机模式，不跟随
-        }
         FollowingType::Robot => {
-            // 第一人称视角
-            let view = view_offset.into_inner();
-            camera_transform.translation =
-                infantry_transform.translation + gimbal_transform.rotation * view.0.translation;
-            camera_transform.rotation = gimbal_transform.rotation * view.0.rotation;
+            // 相机位置 = infantry位置 + 组合旋转 * view_offset位置
+            camera_transform.translation = infantry.translation
+                + (infantry.rotation * gimbal_transform.rotation) * view_offset.0.translation;
+            // 相机旋转 = infantry旋转 * gimbal局部旋转（不使用 view_offset.rotation）
+            camera_transform.rotation = infantry.rotation * gimbal_transform.rotation;
         }
         FollowingType::ThirdPerson => {
-            // 第三人称视角
-            let target_pos = infantry_transform.translation;
-            let offset = gimbal_transform.rotation * main_camera.follow_offset;
-            camera_transform.translation = target_pos + offset;
-            camera_transform.look_at(target_pos, Vec3::Y);
+            let base_transform = infantry.into_inner();
+            let offset = base_transform.rotation * camera_offset.follow_offset;
+            camera_transform.translation = base_transform.translation + offset;
+            camera_transform.look_at(base_transform.translation, Vec3::Y);
         }
+        FollowingType::Free => {}
     }
 }
 
 fn freecam_controls(
     time: Res<Time>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut mouse_motion: EventReader<MouseMotion>,
     mode: Res<CameraMode>,
-    mut camera_query: Query<&mut Transform, With<MainCamera>>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    camera_query: Single<&mut Transform, (With<MainCamera>, Without<InfantryRoot>)>,
 ) {
     if mode.0 != FollowingType::Free {
-        mouse_motion.clear();
         return;
     }
 
-    let dt = time.delta_secs();
-    let move_speed = 10.0;
-    let look_speed = 0.002;
+    let delta = time.delta_secs();
+    let mut camera_transform = camera_query.into_inner();
 
-    for mut transform in camera_query.iter_mut() {
-        // 移动控制
-        let forward = transform.forward();
-        let right = transform.right();
+    let mut mouse_delta = Vec2::ZERO;
+    for event in mouse_motion_events.read() {
+        mouse_delta += event.delta;
+    }
 
-        if keyboard.pressed(KeyCode::KeyW) {
-            transform.translation += forward * move_speed * dt;
-        }
-        if keyboard.pressed(KeyCode::KeyS) {
-            transform.translation -= forward * move_speed * dt;
-        }
-        if keyboard.pressed(KeyCode::KeyD) {
-            transform.translation += right * move_speed * dt;
-        }
-        if keyboard.pressed(KeyCode::KeyA) {
-            transform.translation -= right * move_speed * dt;
-        }
-        if keyboard.pressed(KeyCode::Space) {
-            transform.translation += Vec3::Y * move_speed * dt;
-        }
-        if keyboard.pressed(KeyCode::ShiftLeft) {
-            transform.translation -= Vec3::Y * move_speed * dt;
-        }
+    if mouse_delta != Vec2::ZERO {
+        let (yaw, pitch, roll) = camera_transform.rotation.to_euler(EulerRot::YXZ);
 
-        // 视角控制
-        for event in mouse_motion.read() {
-            let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
-            yaw -= event.delta.x * look_speed;
-            pitch -= event.delta.y * look_speed;
-            pitch = pitch.clamp(-1.5, 1.5);
-            transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
-        }
+        let new_yaw = yaw - mouse_delta.x * 0.003;
+        let new_pitch = (pitch - mouse_delta.y * 0.003).clamp(-1.4, 1.4);
+
+        camera_transform.rotation = Quat::from_euler(EulerRot::YXZ, new_yaw, new_pitch, roll);
+    }
+
+    const CAMERA_SPEED: f32 = 8.0;
+    let speed = CAMERA_SPEED * delta;
+    let forward = camera_transform.forward();
+    let right = camera_transform.right();
+    let up = camera_transform.up();
+
+    if keyboard.pressed(KeyCode::KeyW) {
+        camera_transform.translation += forward * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        camera_transform.translation -= forward * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        camera_transform.translation -= right * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyD) {
+        camera_transform.translation += right * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyN) {
+        camera_transform.translation += up * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyJ) {
+        camera_transform.translation -= up * speed;
     }
 }
 
-fn screenshot_on_f2(mut commands: Commands, keyboard: Res<ButtonInput<KeyCode>>) {
-    if keyboard.just_pressed(KeyCode::F2) {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let path = format!("screenshot_{}.png", timestamp);
-
+fn screenshot_on_f2(
+    mut commands: Commands,
+    input: Res<ButtonInput<KeyCode>>,
+    mut counter: Local<u32>,
+) {
+    if input.just_pressed(KeyCode::F2) {
+        let path = format!("./screenshot-{}.png", *counter);
+        *counter += 1;
         commands
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(path));
-
-        info!(
-            "Screenshot saved to {}",
-            format!("screenshot_{}.png", timestamp)
-        );
     }
 }
 
-fn screenshot_saving(// mut commands: Commands,
-    // screenshots: Query<(Entity, &Screenshot, &Capturing)>,
-) {
-    // for (entity, screenshot, capturing) in screenshots.iter() {
-    //     if capturing.is_capturing() {
-    //         continue;
-    //     }
-    //     let path = format!(
-    //         "screenshot_{}.png",
-    //         std::time::SystemTime::now()
-    //             .duration_since(std::time::UNIX_EPOCH)
-    //             .unwrap()
-    //             .as_millis()
-    //     );
-    //     if let Err(e) = save_to_disk(screenshot.clone(), &path) {
-    //         error!("Failed to save screenshot: {}", e);
-    //     } else {
-    //         info!("Screenshot saved to {}", path);
-    //     }
-    //     commands.entity(entity).remove::<Screenshot>();
-    // }
+fn screenshot_saving() {
+    // 保留为空以维持兼容性
 }
