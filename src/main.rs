@@ -657,17 +657,43 @@ fn gimbal_controls(
     (gimbal_data.local_yaw, gimbal_data.pitch, _) =
         gimbal_transform.rotation.to_euler(EulerRot::YXZ);
 
-    if keyboard.pressed(KeyCode::ArrowLeft) {
-        gimbal_data.local_yaw += GIMBAL_ROTATION_SPEED * dt;
-    }
-    if keyboard.pressed(KeyCode::ArrowRight) {
-        gimbal_data.local_yaw -= GIMBAL_ROTATION_SPEED * dt;
-    }
-    if keyboard.pressed(KeyCode::ArrowUp) {
-        gimbal_data.pitch += GIMBAL_ROTATION_SPEED * dt;
-    }
-    if keyboard.pressed(KeyCode::ArrowDown) {
-        gimbal_data.pitch -= GIMBAL_ROTATION_SPEED * dt;
+    if auto_aim.enabled && target_euler.valid {
+        // 自瞄模式：平滑转动到目标角度
+        let target_yaw = target_euler.yaw;
+        let target_pitch = target_euler.pitch;
+
+        // 计算角度差
+        let yaw_diff = angle_diff(gimbal_data.local_yaw, target_yaw);
+        let pitch_diff = target_pitch - gimbal_data.pitch;
+
+        // 按照 GIMBAL_ROTATION_SPEED 速率转动
+        let max_delta = GIMBAL_ROTATION_SPEED * dt;
+
+        // Yaw 控制
+        if yaw_diff.abs() > 0.001 {
+            let yaw_step = yaw_diff.clamp(-max_delta, max_delta);
+            gimbal_data.local_yaw += yaw_step;
+        }
+
+        // Pitch 控制
+        if pitch_diff.abs() > 0.001 {
+            let pitch_step = pitch_diff.clamp(-max_delta, max_delta);
+            gimbal_data.pitch += pitch_step;
+        }
+    } else {
+        // 手动模式：键盘控制
+        if keyboard.pressed(KeyCode::ArrowLeft) {
+            gimbal_data.local_yaw += GIMBAL_ROTATION_SPEED * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) {
+            gimbal_data.local_yaw -= GIMBAL_ROTATION_SPEED * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowUp) {
+            gimbal_data.pitch += GIMBAL_ROTATION_SPEED * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            gimbal_data.pitch -= GIMBAL_ROTATION_SPEED * dt;
+        }
     }
 
     gimbal_data.pitch = gimbal_data.pitch.clamp(-0.785, 0.785);
