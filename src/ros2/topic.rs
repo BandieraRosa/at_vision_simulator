@@ -1,6 +1,8 @@
 use bevy::prelude::Resource;
-use r2r::geometry_msgs::msg::PoseStamped;
+use r2r::geometry_msgs::msg::{PoseStamped, Vector3Stamped};
 use r2r::sensor_msgs::msg::{CameraInfo, CompressedImage, Image};
+use r2r::std_msgs::msg::Bool;
+use r2r::std_msgs::msg::Float64;
 use r2r::tf2_msgs::msg::TFMessage;
 use r2r::{QosProfile, WrappedTypesupport};
 use std::sync::mpsc::SyncSender;
@@ -104,3 +106,10 @@ define_topic!(GlobalTransformTopic, TFMessage, "/tf");
 define_topic!(GimbalPoseTopic, PoseStamped, "/gimbal_pose");
 define_topic!(OdomPoseTopic, PoseStamped, "/odom_pose");
 define_topic!(CameraPoseTopic, PoseStamped, "/camera_pose");
+
+// 新增订阅话题
+define_topic!(TargetEulerTopic, Vector3Stamped, "/target_eulr");
+define_topic!(FireNotifyTopic, Bool, "/fire_notify");
+
+// 新增发布话题
+define_topic!(CurrentVelocityTopic, Float64, "/current_velocity");
