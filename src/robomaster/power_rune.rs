@@ -24,7 +24,7 @@ use bevy::{
     time::{Time, Timer, TimerMode},
     transform::components::Transform,
 };
-use rand::{seq::SliceRandom, Rng};
+use rand::{Rng, seq::SliceRandom};
 
 use crate::robomaster::visibility::{Activation, Control, Controller, Param};
 use crate::util::bevy::{drain_entities_by, insert_all_child};
@@ -567,7 +567,10 @@ fn build_targets(
         for entity in [deactivated, activating, activated] {
             if let Some(entity) = entity {
                 insert_all_child(&mut param.commands, entity, &mut param.children, || {
-                    (RuneIndex(logical_index, face_entity), CollisionEventsEnabled)
+                    (
+                        RuneIndex(logical_index, face_entity),
+                        CollisionEventsEnabled,
+                    )
                 });
             }
         }
@@ -829,7 +832,11 @@ fn rune_activation_tick(time: Res<Time>, mut runes: Query<&mut PowerRune>) {
     }
 }
 
-fn rune_visual_tick(time: Res<Time>, mut runes: Query<(&mut Transform, &mut PowerRune)>, mut param: PowerRuneParam) {
+fn rune_visual_tick(
+    time: Res<Time>,
+    mut runes: Query<(&mut Transform, &mut PowerRune)>,
+    mut param: PowerRuneParam,
+) {
     let dt = time.delta_secs();
     for (mut transform, mut rune) in &mut runes {
         let mode = rune.mode;

@@ -22,9 +22,9 @@ pub fn on_activate(
     let Ok(_rune) = query.get(ev.rune) else {
         return;
     };
-    commands.spawn(AudioPlayer::new(asset_server.load(
-        "embedded://daedalus/assets/rune_activated.ogg",
-    )));
+    commands.spawn(AudioPlayer::new(
+        asset_server.load("embedded://daedalus/assets/rune_activated.ogg"),
+    ));
 }
 
 pub fn on_hit(
@@ -38,8 +38,8 @@ pub fn on_hit(
     };
     if ev.result.accurate {
         increase_accurate();
-        commands.spawn(AudioPlayer::new(asset_server.load(
-            "embedded://daedalus/assets/projectile_launch.ogg",
-        )));
+        commands.spawn(AudioPlayer::new(
+            asset_server.load("embedded://daedalus/assets/projectile_launch.ogg"),
+        ));
     }
 }
