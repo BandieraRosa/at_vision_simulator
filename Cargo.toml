@@ -7,6 +7,7 @@ edition = "2024"
 default-run = "daedalus"
 
 [dependencies]
+futures-lite = "2"
 bevy = { version = "0.17.2", features = ["std",
     "async_executor",
     "bevy_asset",
