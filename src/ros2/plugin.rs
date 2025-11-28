@@ -1,20 +1,22 @@
 use crate::ros2::capture::{CaptureConfig, RosCaptureContext, RosCapturePlugin};
 use crate::ros2::topic::*;
 use crate::{
-    InfantryGimbal, InfantryViewOffset, LocalInfantry, arc_mutex, publisher,
+    arc_mutex, publisher,
     robomaster::power_rune::{PowerRune, RuneIndex},
+    subscriber, InfantryGimbal, InfantryViewOffset, LocalInfantry,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
+use r2r::geometry_msgs::msg::{Pose, PoseStamped, QuaternionStamped};
+use r2r::std_msgs::msg::Float64;
 use r2r::ClockType::SystemTime;
-use r2r::geometry_msgs::msg::{Pose, PoseStamped};
-use r2r::{Clock, Context, Node, std_msgs::msg::Header, tf2_msgs::msg::TFMessage};
+use r2r::{tf2_msgs::msg::TFMessage, Clock, Context, Node, std_msgs::msg::Header};
 use std::f32::consts::PI;
 use std::time::Duration;
 use std::{
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
     },
     thread::{self, JoinHandle},
 };
@@ -43,6 +45,20 @@ pub fn transform(bevy_transform: Transform) -> r2r::geometry_msgs::msg::Transfor
             z: new_rotation.z as f64,
             w: new_rotation.w as f64,
         },
+    }
+}
+
+/// 将 Bevy 四元数转换为 ROS2 四元数
+#[inline]
+pub fn quaternion_to_ros(bevy_quat: Quat) -> r2r::geometry_msgs::msg::Quaternion {
+    let align_rot_mat = M_ALIGN_MAT3;
+    let align_quat = Quat::from_mat3(&align_rot_mat);
+    let new_rotation = align_quat * bevy_quat * align_quat.inverse();
+    r2r::geometry_msgs::msg::Quaternion {
+        x: new_rotation.x as f64,
+        y: new_rotation.y as f64,
+        z: new_rotation.z as f64,
+        w: new_rotation.w as f64,
     }
 }
 
@@ -323,6 +339,7 @@ impl Plugin for ROS2Plugin {
         let mut node = Node::create(Context::create().unwrap(), "simulator", "robomaster").unwrap();
         let signal_arc = Arc::new(AtomicBool::new(false));
 
+        // 创建发布者
         publisher!(
             signal_arc,
             app,
@@ -330,16 +347,25 @@ impl Plugin for ROS2Plugin {
             GlobalTransformTopic,
             GimbalPoseTopic,
             OdomPoseTopic,
-            CameraPoseTopic
+            CameraPoseTopic,
+            GimbalQuaternionTopic,
+            CurrentVelocityTopic
         );
+
         let camera_info = Arc::new(publisher!(signal_arc, node, CameraInfoTopic));
         let image_raw = Arc::new(publisher!(signal_arc, node, ImageRawTopic));
         let image_compressed = Arc::new(publisher!(signal_arc, node, ImageCompressedTopic));
+
+        subscriber!(signal_arc, app, node, TargetEulerTopic, FireNotifyTopic);
 
         let clock = arc_mutex!(Clock::create(SystemTime).unwrap());
 
         app.insert_resource(RoboMasterClock(clock.clone()))
             .insert_resource(StopSignal(signal_arc.clone()))
+            .insert_resource(AutoAimMode::default())
+            .insert_resource(TargetEuler::default())
+            .insert_resource(FireCommand::default())
+            .insert_resource(ProjectileVelocity::default())
             .add_plugins(RosCapturePlugin {
                 config: CaptureConfig {
                     width: 1440,
@@ -355,10 +381,18 @@ impl Plugin for ROS2Plugin {
                 },
             })
             .add_systems(Last, cleanup_ros2_system)
-            .add_systems(Update, capture_rune.after(TransformSystems::Propagate))
+            .add_systems(
+                Update,
+                (
+                    process_subscriptions,
+                    capture_rune.after(TransformSystems::Propagate),
+                    publish_gimbal_quaternion.after(TransformSystems::Propagate),
+                    publish_projectile_velocity,
+                ),
+            )
             .insert_resource(SpinThreadHandle(Some(thread::spawn(move || {
                 while !signal_arc.load(Ordering::Acquire) {
-                    node.spin_once(Duration::from_millis(1000));
+                    node.spin_once(Duration::from_millis(1));
                 }
             }))));
     }
