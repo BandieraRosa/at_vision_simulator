@@ -64,6 +64,35 @@ pub struct MainCamera;
 #[derive(Resource)]
 pub struct RoboMasterClock(pub Arc<Mutex<Clock>>);
 
+/// 自瞄模式状态
+#[derive(Resource, Default)]
+pub struct AutoAimMode {
+    pub enabled: bool,
+}
+
+#[derive(Resource, Default, Clone)]
+pub struct TargetEuler {
+    pub yaw: f32,   // rad
+    pub pitch: f32,
+    pub valid: bool,
+}
+
+#[derive(Resource, Default)]
+pub struct FireCommand {
+    pub fire: bool,
+}
+
+#[derive(Resource)]
+pub struct ProjectileVelocity {
+    pub speed: f32, // m/s
+}
+
+impl Default for ProjectileVelocity {
+    fn default() -> Self {
+        Self { speed: 20.0 }
+    }
+}
+
 #[macro_export]
 macro_rules! add_tf_frame {
     ($ls:ident, $hdr:expr, $id:expr, $translation:expr, $rotation:expr) => {
@@ -106,6 +135,65 @@ macro_rules! pose {
             },
         }
     };
+}
+
+fn process_subscriptions(
+    target_euler_sub: Option<Res<TopicSubscriber<TargetEulerTopic>>>,
+    fire_notify_sub: Option<Res<TopicSubscriber<FireNotifyTopic>>>,
+    mut target_euler: ResMut<TargetEuler>,
+    mut fire_command: ResMut<FireCommand>,
+    auto_aim: Res<AutoAimMode>,
+) {
+    if !auto_aim.enabled {
+        target_euler.valid = false;
+        fire_command.fire = false;
+        return;
+    }
+
+    if let Some(sub) = target_euler_sub {
+        if let Some(msg) = sub.get_latest() {
+            target_euler.yaw = msg.vector.x as f32;
+            target_euler.pitch = msg.vector.y as f32;
+            target_euler.valid = true;
+        }
+    }
+
+    if let Some(sub) = fire_notify_sub {
+        if let Some(msg) = sub.get_latest() {
+            fire_command.fire = msg.data;
+        }
+    }
+}
+
+fn publish_gimbal_quaternion(
+    gimbal: Single<&GlobalTransform, (With<LocalInfantry>, With<InfantryGimbal>)>,
+    clock: Res<RoboMasterClock>,
+    gimbal_quat_pub: Res<TopicPublisher<GimbalQuaternionTopic>>,
+) {
+    let gimbal_transform = gimbal.into_inner();
+    let stamp = Clock::to_builtin_time(&res_unwrap!(clock).get_now().unwrap());
+
+    let header = Header {
+        stamp,
+        frame_id: "odom".to_string(),
+    };
+
+    let quat_msg = QuaternionStamped {
+        header,
+        quaternion: quaternion_to_ros(gimbal_transform.rotation()),
+    };
+
+    gimbal_quat_pub.publish(quat_msg);
+}
+
+fn publish_projectile_velocity(
+    velocity: Res<ProjectileVelocity>,
+    velocity_pub: Res<TopicPublisher<CurrentVelocityTopic>>,
+) {
+    let msg = Float64 {
+        data: velocity.speed as f64,
+    };
+    velocity_pub.publish(msg);
 }
 
 fn capture_rune(
