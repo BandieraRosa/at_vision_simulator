@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use avian3d::prelude::{CollisionEnd, CollisionEventsEnabled};
+use bevy::math::Quat;
 use bevy::prelude::GizmoAsset;
 use bevy::{
     app::Update,
@@ -23,7 +24,7 @@ use bevy::{
     time::{Time, Timer, TimerMode},
     transform::components::Transform,
 };
-use rand::{Rng, seq::SliceRandom};
+use rand::{seq::SliceRandom, Rng};
 
 use crate::robomaster::visibility::{Activation, Control, Controller, Param};
 use crate::util::bevy::{drain_entities_by, insert_all_child};
@@ -127,7 +128,7 @@ struct ActivatingState {
     hit_flags: Vec<bool>,
     window: ActivationWindow,
     timeout: Timer,
-    global_timeout: Timer, // 20秒全局激活超时
+    global_timeout: Timer,
 }
 
 struct VariableRotation {
@@ -159,8 +160,8 @@ const LARGE_SECONDARY_TIMEOUT: f32 = 1.0;
 const INACTIVE_WAIT: f32 = 1.0;
 const FAILURE_RECOVER: f32 = 1.5;
 const ACTIVATED_HOLD: f32 = 6.0;
-const ACTIVATION_GLOBAL_TIMEOUT: f32 = 20.0; // 20秒全局激活超时
-const ROTATION_BASELINE_SMALL: f32 = std::f32::consts::PI / 3.0; // 小机关固定角速度
+const ACTIVATION_GLOBAL_TIMEOUT: f32 = 20.0;
+const ROTATION_BASELINE_SMALL: f32 = std::f32::consts::PI / 3.0;
 
 struct RotationController {
     baseline: f32,
@@ -181,7 +182,6 @@ impl RotationController {
 
     fn reset_variable(&mut self, rng: &mut impl Rng) {
         self.variable = Some(VariableRotation::random(rng));
-        // 确保重置时间参数
         if let Some(ref mut variable) = self.variable {
             variable.t = 0.0;
         }
@@ -196,7 +196,6 @@ impl RotationController {
         if mode == RuneMode::Small {
             return sgn * self.baseline;
         }
-        // 大机关只有在激活状态下使用变量旋转
         if let Some(variable) = &mut self.variable {
             variable.advance(dt);
             return sgn * variable.speed();
@@ -283,15 +282,13 @@ impl PowerRune {
             hit_flags: vec![false; count],
             window: ActivationWindow::Primary,
             timeout: Timer::from_seconds(ACTIVATION_PRIMARY_TIMEOUT, TimerMode::Once),
-            global_timeout: Timer::from_seconds(ACTIVATION_GLOBAL_TIMEOUT, TimerMode::Once), // 20秒全局激活超时
+            global_timeout: Timer::from_seconds(ACTIVATION_GLOBAL_TIMEOUT, TimerMode::Once),
         })
     }
 
     fn enter_activating(&mut self, rng: &mut impl Rng) {
-        // 重新创建旋转控制器确保参数完全重置
         self.rotation.clear_variable();
 
-        // 大机关激活时使用变量旋转，小机关使用固定速度
         if self.mode == RuneMode::Large {
             self.rotation.reset_variable(rng);
         }
@@ -319,7 +316,6 @@ impl PowerRune {
 
     fn enter_completed(&mut self) {
         self.reset_all_targets(Activation::Completed);
-        // 激活状态下停止旋转
         self.rotation.clear_variable();
         self.state = MechanismState::Activated {
             wait: Timer::from_seconds(ACTIVATED_HOLD, TimerMode::Once),
@@ -341,7 +337,6 @@ impl PowerRune {
                     .position(|&idx| idx == target_index)
                 else {
                     if !FUNNY {
-                        // 击中非点亮模块，触发激活失败
                         self.enter_failed();
                     }
                     return HitResult {
@@ -389,9 +384,7 @@ impl PowerRune {
                     RuneMode::Large => {
                         let hits = state.hit_flags.iter().filter(|&&flag| flag).count();
 
-                        // 大机关逻辑：规则要求命中任意一个靶后启动1秒二次窗口
                         if hits == 1 && state.window == ActivationWindow::Primary {
-                            // 命中第一个靶后启动1秒二次命中窗口
                             state.window = ActivationWindow::Secondary;
                             state.timeout =
                                 Timer::from_seconds(LARGE_SECONDARY_TIMEOUT, TimerMode::Once);
@@ -401,7 +394,6 @@ impl PowerRune {
                             };
                         }
 
-                        // 处理边界情况：如果二次窗口超时后仍未命中第二个靶，进入下一轮
                         if let Some(next) = self.build_new_round(rng) {
                             self.state = MechanismState::Activating(next);
                             return HitResult {
@@ -571,28 +563,11 @@ fn build_targets(
         let completed = name_map.remove(completed);
 
         let logical_index = targets.len();
-        /*
-        let mut gizmo = GizmoAsset::new();
-        gizmo
-            .sphere(Isometry3d::IDENTITY, 0.15, CRIMSON)
-            .resolution(30_000 / 3);
-        let handle = param.gizmo_assets.add(gizmo);
-        */
+
         for entity in [deactivated, activating, activated] {
             if let Some(entity) = entity {
                 insert_all_child(&mut param.commands, entity, &mut param.children, || {
-                    (
-                        RuneIndex(logical_index, face_entity),
-                        CollisionEventsEnabled,
-                        /*Gizmo {
-                            handle: handle.clone(),
-                            line_config: GizmoLineConfig {
-                                width: 2.,
-                                ..default()
-                            },
-                            ..default()
-                        },*/
-                    )
+                    (RuneIndex(logical_index, face_entity), CollisionEventsEnabled)
                 });
             }
         }
@@ -810,15 +785,12 @@ fn rune_activation_tick(time: Res<Time>, mut runes: Query<&mut PowerRune>) {
             MechanismState::Activating(state) => {
                 let mut action = None;
 
-                // 检查20秒全局激活超时（最高优先级）
                 if state.global_timeout.tick(delta).just_finished() {
-                    action = Some(RuneAction::Failure); // 20秒全局超时激活失败
-                }
-                // 否则检查激活窗口超时
-                else if state.timeout.tick(delta).just_finished() {
+                    action = Some(RuneAction::Failure);
+                } else if state.timeout.tick(delta).just_finished() {
                     action = match state.window {
-                        ActivationWindow::Primary => Some(RuneAction::Failure), // 2.5秒超时激活失败
-                        ActivationWindow::Secondary => Some(RuneAction::NewRound), // 1秒窗口过期进入下一轮
+                        ActivationWindow::Primary => Some(RuneAction::Failure),
+                        ActivationWindow::Secondary => Some(RuneAction::NewRound),
                     };
                 }
 
@@ -857,10 +829,17 @@ fn rune_activation_tick(time: Res<Time>, mut runes: Query<&mut PowerRune>) {
     }
 }
 
-fn rune_apply_visuals(mut runes: Query<&mut PowerRune>, mut param: PowerRuneParam) {
-    for mut rune in &mut runes {
-        rune.apply_shared_visual(&mut param);
+fn rune_visual_tick(time: Res<Time>, mut runes: Query<(&mut Transform, &mut PowerRune)>, mut param: PowerRuneParam) {
+    let dt = time.delta_secs();
+    for (mut transform, mut rune) in &mut runes {
         let mode = rune.mode;
+
+        // 旋转
+        let speed = rune.rotation.current_speed(mode, dt);
+        transform.rotate(Quat::from_axis_angle(*rune.rotation.direction, speed * dt));
+
+        // 视觉更新
+        rune.apply_shared_visual(&mut param);
         for target in &mut rune.targets {
             if target.state != target.applied_state {
                 target.visual.apply(mode, target.state, &mut param);
@@ -870,33 +849,13 @@ fn rune_apply_visuals(mut runes: Query<&mut PowerRune>, mut param: PowerRunePara
     }
 }
 
-fn rune_rotation_system(time: Res<Time>, mut runes: Query<(&mut Transform, &mut PowerRune)>) {
-    let dt = time.delta_secs();
-    for (mut transform, mut rune) in &mut runes {
-        let mode = rune.mode.clone();
-        // 只有在激活状态下大机关才使用变量旋转
-        let speed = rune.rotation.current_speed(mode, dt);
-        let angle = speed * dt;
-
-        // 确保旋转方向正确：红方顺时针(正角)，蓝方逆时针(负角)
-        transform.rotate_local_axis(rune.rotation.direction, angle);
-    }
-}
-
 pub struct PowerRunePlugin;
 
 impl bevy::app::Plugin for PowerRunePlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.init_resource::<MaterialCache>()
-            .add_observer(handle_rune_collision)
             .add_observer(setup_power_rune)
-            .add_systems(
-                Update,
-                (
-                    rune_activation_tick,
-                    rune_apply_visuals,
-                    rune_rotation_system,
-                ),
-            );
+            .add_observer(handle_rune_collision)
+            .add_systems(Update, (rune_activation_tick, rune_visual_tick));
     }
 }
