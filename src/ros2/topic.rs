@@ -1,11 +1,14 @@
 use bevy::prelude::Resource;
-use r2r::geometry_msgs::msg::{PoseStamped, Vector3Stamped};
+use r2r::geometry_msgs::msg::{PoseStamped, QuaternionStamped, Vector3Stamped};
 use r2r::sensor_msgs::msg::{CameraInfo, CompressedImage, Image};
 use r2r::std_msgs::msg::Bool;
 use r2r::std_msgs::msg::Float64;
 use r2r::tf2_msgs::msg::TFMessage;
 use r2r::{QosProfile, WrappedTypesupport};
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
+
+// ==================== Publisher ====================
 
 #[derive(Resource)]
 pub struct TopicPublisher<T: RosTopic> {
@@ -55,24 +58,21 @@ impl<T: RosTopic> TopicSubscriber<T> {
 
 #[macro_export]
 macro_rules! publisher {
-    ($node:ident,$topic:ty) => {
-        {
-            let (sender, receiver): (
-                ::std::sync::mpsc::SyncSender<<$topic as crate::ros2::topic::RosTopic>::T>,
-                ::std::sync::mpsc::Receiver<<$topic as crate::ros2::topic::RosTopic>::T>,
-            ) = ::std::sync::mpsc::sync_channel(1024);
+    ($node:ident,$topic:ty) => {{
+        let (sender, receiver): (
+            ::std::sync::mpsc::SyncSender<<$topic as crate::ros2::topic::RosTopic>::T>,
+            ::std::sync::mpsc::Receiver<<$topic as crate::ros2::topic::RosTopic>::T>,
+        ) = ::std::sync::mpsc::sync_channel(1024);
 
-            let publisher = $node.create_publisher(
-                <$topic>::TOPIC,
-                <$topic>::QOS,
-            ).unwrap();
+        let publisher = $node
+            .create_publisher(<$topic>::TOPIC, <$topic>::QOS)
+            .unwrap();
 
-            (receiver, sender, publisher)
-        }
-    };
+        (receiver, sender, publisher)
+    }};
     ($atomic:expr, $node:ident, $topic:ty) => {{
         let atomic = $atomic.clone();
-        let (receiver,sender,publisher) = publisher!($node, $topic);
+        let (receiver, sender, publisher) = publisher!($node, $topic);
         ::std::thread::spawn(move || {
             while !atomic.load(::std::sync::atomic::Ordering::Acquire) {
                 let mut did_work = false;
@@ -171,7 +171,6 @@ macro_rules! subscriber {
     };
 }
 
-
 pub trait RosTopic {
     type T: WrappedTypesupport + 'static;
     const TOPIC: &'static str;
@@ -192,6 +191,8 @@ macro_rules! define_topic {
     };
 }
 
+// ==================== 发布话题定义 ====================
+
 define_topic!(CameraInfoTopic, CameraInfo, "/camera_info");
 define_topic!(ImageRawTopic, Image, "/image_raw");
 define_topic!(ImageCompressedTopic, CompressedImage, "/image_compressed");
@@ -201,9 +202,20 @@ define_topic!(GimbalPoseTopic, PoseStamped, "/gimbal_pose");
 define_topic!(OdomPoseTopic, PoseStamped, "/odom_pose");
 define_topic!(CameraPoseTopic, PoseStamped, "/camera_pose");
 
-// 新增订阅话题
-define_topic!(TargetEulerTopic, Vector3Stamped, "/target_eulr");
-define_topic!(FireNotifyTopic, Bool, "/fire_notify");
+// 云台四元数位姿发布
+define_topic!(
+    GimbalQuaternionTopic,
+    QuaternionStamped,
+    "/gimbal_quaternion"
+);
 
-// 新增发布话题
+// 弹丸速度发布
 define_topic!(CurrentVelocityTopic, Float64, "/current_velocity");
+
+// ==================== 订阅话题定义 ====================
+
+// 云台目标欧拉角订阅
+define_topic!(TargetEulerTopic, Vector3Stamped, "/target_eulr");
+
+// 开火指令订阅
+define_topic!(FireNotifyTopic, Bool, "/fire_notify");
