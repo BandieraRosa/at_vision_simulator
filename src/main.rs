@@ -6,7 +6,8 @@ mod statistic;
 mod util;
 
 use crate::dataset::prelude::DatasetPlugin;
-use crate::ros2::plugin::ROS2Plugin;
+use crate::ros2::plugin::{AutoAimMode, FireCommand, ProjectileVelocity, ROS2Plugin, TargetEuler};
+use crate::ros2::topic::{CurrentVelocityTopic, TopicPublisher};
 use crate::util::bevy::insert_all_child;
 use crate::{
     handler::{on_activate, on_hit},
@@ -17,7 +18,7 @@ use avian3d::prelude::*;
 use bevy::asset::embedded_asset;
 use bevy::camera::Exposure;
 use bevy::light::light_consts::lux;
-use bevy::render::view::screenshot::{Capturing, Screenshot, save_to_disk};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{CursorIcon, PresentMode, SystemCursorIcon};
 use bevy::winit::WinitWindows;
 use bevy::{
@@ -34,10 +35,10 @@ struct MainCamera {
 }
 
 #[derive(Component)]
-struct LocalInfantry;
+pub struct LocalInfantry;
 
 #[derive(Component)]
-struct InfantryRoot;
+pub struct InfantryRoot;
 
 #[derive(Resource, PartialEq)]
 struct CameraMode(pub FollowingType);
@@ -55,13 +56,13 @@ struct InfantryChassis {
 }
 
 #[derive(Component, Default)]
-struct InfantryGimbal {
+pub struct InfantryGimbal {
     local_yaw: f32,
     pitch: f32,
 }
 
 #[derive(Component)]
-struct InfantryViewOffset(Transform);
+pub struct InfantryViewOffset(Transform);
 
 #[derive(Component)]
 struct InfantryLaunchOffset(Transform);
@@ -80,20 +81,26 @@ enum GameLayer {
 struct Cooldown(Timer);
 
 /// Creates help text at the bottom of the screen.
-fn create_help_text() -> Text {
+fn create_help_text(auto_aim_enabled: bool) -> Text {
+    let mode_str = if auto_aim_enabled {
+        "AUTO-AIM"
+    } else {
+        "MANUAL"
+    };
     format!(
-        "total={} accurate={} pct={}\nControls: F2-Screenshot F3-Change Camera | WASD-Move Mouse-Look Space-Shoot\n2025 Actor&Thinker",
+        "total={} accurate={} pct={:.2}% mode={}\nControls: F2-Screenshot F3-Camera T-AutoAim | WASD-Move Arrows-Gimbal Space-Shoot\n2025 Actor&Thinker",
         launch_count(),
         accurate_count(),
-        accurate_pct()
+        accurate_pct() * 100.0,
+        mode_str
     )
-        .into()
+    .into()
 }
 
 /// Spawns the help text at the bottom of the screen.
 fn spawn_text(commands: &mut Commands) {
     commands.spawn((
-        create_help_text(),
+        create_help_text(false),
         Node {
             position_type: PositionType::Absolute,
             bottom: px(12),
@@ -103,9 +110,9 @@ fn spawn_text(commands: &mut Commands) {
     ));
 }
 
-fn update_help_text(mut text: Query<&mut Text>) {
+fn update_help_text(mut text: Query<&mut Text>, auto_aim: Res<AutoAimMode>) {
     for mut text in text.iter_mut() {
-        *text = create_help_text();
+        *text = create_help_text(auto_aim.enabled);
     }
 }
 
@@ -153,6 +160,7 @@ fn main() {
             Update,
             (
                 update_help_text,
+                update_auto_aim_mode,
                 following_controls,
                 vehicle_controls,
                 remote_vehicle_controls,
@@ -169,6 +177,11 @@ fn main() {
             projectile_launch.after(TransformSystems::Propagate),
         )
         .run();
+}
+
+/// 更新自瞄模式状态（按住 T 键启用）
+fn update_auto_aim_mode(keyboard: Res<ButtonInput<KeyCode>>, mut auto_aim: ResMut<AutoAimMode>) {
+    auto_aim.enabled = keyboard.pressed(KeyCode::KeyT);
 }
 
 #[derive(Component)]
@@ -211,10 +224,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     };
 
     commands.spawn((
-        SceneRoot(
-            asset_server
-                .load("embedded://daedalus/assets/GROUND_DISPLAY.glb#Scene0"),
-        ),
+        SceneRoot(asset_server.load("embedded://daedalus/assets/GROUND_DISPLAY.glb#Scene0")),
         Transform::IDENTITY,
         PreciousCollision(HashMap::from([(
             "GROUND_LOW".to_string(),
@@ -224,10 +234,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     let mut power_rune_col = HashMap::from([]);
     for i in 1..=2 {
-        /*power_rune_col.insert(
-            format!("FACE_{}", i).to_string(),
-            (trimesh.clone(), layer_env, Visibility::Visible),
-        );*/
         for j in 1..=5 {
             for k in ["ACTIVATED", "ACTIVE", "COMPLETED", "DISABLED"] {
                 power_rune_col.insert(
@@ -241,9 +247,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         RigidBody::Static,
         CollisionMargin(0.001),
         Restitution::ZERO,
-        SceneRoot(
-            asset_server.load("embedded://daedalus/assets/POWER.glb#Scene0"),
-        ),
+        SceneRoot(asset_server.load("embedded://daedalus/assets/POWER.glb#Scene0")),
         Transform::IDENTITY,
         PowerRuneRoot,
         PreciousCollision(power_rune_col),
@@ -268,9 +272,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         LinearDamping(0.0),
         AngularDamping(109.8),
         LockedAxes::new().lock_rotation_x().lock_rotation_z(),
-        SceneRoot(
-            asset_server.load("embedded://daedalus/assets/vehicle.glb#Scene0"),
-        ),
+        SceneRoot(asset_server.load("embedded://daedalus/assets/vehicle.glb#Scene0")),
         Transform::from_xyz(0.0, 1.0, 0.0),
         InfantryRoot,
         LocalInfantry,
@@ -294,9 +296,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         LinearDamping(0.0),
         AngularDamping(109.8),
         LockedAxes::new().lock_rotation_x().lock_rotation_z(),
-        SceneRoot(
-            asset_server.load("embedded://daedalus/assets/vehicle.glb#Scene0"),
-        ),
+        SceneRoot(asset_server.load("embedded://daedalus/assets/vehicle.glb#Scene0")),
         Transform::from_xyz(1.0, 1.0, 1.0),
         InfantryRoot,
     ));
@@ -435,49 +435,66 @@ fn projectile_launch(
         (With<LocalInfantry>, Without<InfantryChassis>),
     >,
     launch_offset: Single<&InfantryLaunchOffset, With<LocalInfantry>>,
+    // 自瞄相关资源
+    auto_aim: Res<AutoAimMode>,
+    fire_command: Res<FireCommand>,
+    velocity_config: Res<ProjectileVelocity>,
 ) {
     cooldown.0.tick(time.delta());
     if !cooldown.0.is_finished() {
         return;
     }
-    cooldown.0.reset();
-    if keyboard.pressed(KeyCode::Space) {
-        increase_launch();
-        let direction = (gimbal.0.rotation() * launch_offset.0.rotation)
-            .mul_vec3(Vec3::Y)
-            .normalize_or_zero();
-        if direction == Vec3::ZERO {
-            return;
-        }
-        let vel = infantry.1.0 + direction * 25.0;
-        commands.spawn((
-            RigidBody::Dynamic,
-            Collider::sphere(44.5 * 0.001 / 2.0),
-            Mass(44.5 * 0.001),
-            Friction::new(1.1),
-            Restitution::ZERO,
-            LinearDamping(0.05),
-            CollisionLayers::new(
-                GameLayer::ProjectileSelf,
-                [
-                    GameLayer::Default,
-                    GameLayer::Vehicle,
-                    GameLayer::ProjectileSelf,
-                    GameLayer::ProjectileOther,
-                    GameLayer::Environment,
-                ],
-            ),
-            Mesh3d(setting.0.clone()),
-            MeshMaterial3d(setting.1.clone()),
-            LinearVelocity(vel),
-            AngularVelocity(infantry.2.0),
-            Transform::IDENTITY.with_translation(
-                infantry.0.translation + (gimbal.0.rotation() * launch_offset.0.translation),
-            ),
-            //AudioPlayer::new(asset_server.load("projectile_launch.ogg")),
-            Projectile,
-        ));
+
+    // 判断是否应该发射
+    let should_fire = if auto_aim.enabled {
+        // 自瞄模式：根据上位机指令发射
+        fire_command.fire
+    } else {
+        // 手动模式：根据空格键发射
+        keyboard.pressed(KeyCode::Space)
+    };
+
+    if !should_fire {
+        return;
     }
+
+    cooldown.0.reset();
+    increase_launch();
+
+    let direction = (gimbal.0.rotation() * launch_offset.0.rotation)
+        .mul_vec3(Vec3::Y)
+        .normalize_or_zero();
+    if direction == Vec3::ZERO {
+        return;
+    }
+
+    let vel = infantry.1.0 + direction * velocity_config.speed;
+    commands.spawn((
+        RigidBody::Dynamic,
+        Collider::sphere(44.5 * 0.001 / 2.0),
+        Mass(44.5 * 0.001),
+        Friction::new(1.1),
+        Restitution::ZERO,
+        LinearDamping(0.05),
+        CollisionLayers::new(
+            GameLayer::ProjectileSelf,
+            [
+                GameLayer::Default,
+                GameLayer::Vehicle,
+                GameLayer::ProjectileSelf,
+                GameLayer::ProjectileOther,
+                GameLayer::Environment,
+            ],
+        ),
+        Mesh3d(setting.0.clone()),
+        MeshMaterial3d(setting.1.clone()),
+        LinearVelocity(vel),
+        AngularVelocity(infantry.2.0),
+        Transform::IDENTITY.with_translation(
+            infantry.0.translation + (gimbal.0.rotation() * launch_offset.0.translation),
+        ),
+        Projectile,
+    ));
 }
 
 fn setup_collision(
@@ -650,10 +667,14 @@ fn gimbal_controls(
         (&mut Transform, &mut InfantryGimbal),
         (With<LocalInfantry>, Without<InfantryChassis>),
     >,
+    // 自瞄相关资源
+    auto_aim: Res<AutoAimMode>,
+    target_euler: Res<TargetEuler>,
 ) {
     let dt = time.delta_secs();
     let (mut gimbal_transform, mut gimbal_data) = gimbal.into_inner();
 
+    // 从当前变换中提取欧拉角
     (gimbal_data.local_yaw, gimbal_data.pitch, _) =
         gimbal_transform.rotation.to_euler(EulerRot::YXZ);
 
@@ -696,12 +717,26 @@ fn gimbal_controls(
         }
     }
 
+    // 限制 pitch 角度范围
     gimbal_data.pitch = gimbal_data.pitch.clamp(-0.785, 0.785);
 
     let gimbal_rotation =
         Quat::from_euler(EulerRot::YXZ, gimbal_data.local_yaw, gimbal_data.pitch, 0.0);
 
     gimbal_transform.rotation = gimbal_rotation;
+}
+
+/// 计算两个角度之间的最短差值（处理 ±π 边界）
+fn angle_diff(current: f32, target: f32) -> f32 {
+    let diff = target - current;
+    // 将差值归一化到 [-π, π] 范围
+    let mut normalized = diff % (2.0 * std::f32::consts::PI);
+    if normalized > std::f32::consts::PI {
+        normalized -= 2.0 * std::f32::consts::PI;
+    } else if normalized < -std::f32::consts::PI {
+        normalized += 2.0 * std::f32::consts::PI;
+    }
+    normalized
 }
 
 fn remote_gimbal_controls(
@@ -757,106 +792,119 @@ fn update_camera_follow(
     mode: Res<CameraMode>,
 ) {
     let gimbal_transform = gimbal.into_inner();
-    let (mut camera_transform, camera_offset) = camera_query.into_inner();
+    let (mut camera_transform, main_camera) = camera_query.into_inner();
+    let infantry_transform = infantry.into_inner();
 
     match mode.0 {
+        FollowingType::Free => {
+            // 自由摄像机模式，不跟随
+        }
         FollowingType::Robot => {
-            camera_transform.translation = infantry.translation
-                + (infantry.rotation * gimbal_transform.rotation) * view_offset.0.translation;
-            camera_transform.rotation = infantry.rotation * gimbal_transform.rotation;
+            // 第一人称视角
+            let view = view_offset.into_inner();
+            camera_transform.translation =
+                infantry_transform.translation + gimbal_transform.rotation * view.0.translation;
+            camera_transform.rotation = gimbal_transform.rotation * view.0.rotation;
         }
         FollowingType::ThirdPerson => {
-            let base_transform = infantry.into_inner();
-            let offset = base_transform.rotation * camera_offset.follow_offset;
-            camera_transform.translation = base_transform.translation + offset;
-            camera_transform.look_at(base_transform.translation, Vec3::Y);
+            // 第三人称视角
+            let target_pos = infantry_transform.translation;
+            let offset = gimbal_transform.rotation * main_camera.follow_offset;
+            camera_transform.translation = target_pos + offset;
+            camera_transform.look_at(target_pos, Vec3::Y);
         }
-        FollowingType::Free => {}
     }
 }
 
 fn freecam_controls(
     time: Res<Time>,
-    mode: Res<CameraMode>,
-    mut mouse_motion_events: MessageReader<MouseMotion>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    camera_query: Single<&mut Transform, (With<MainCamera>, Without<InfantryRoot>)>,
+    mut mouse_motion: EventReader<MouseMotion>,
+    mode: Res<CameraMode>,
+    mut camera_query: Query<&mut Transform, With<MainCamera>>,
 ) {
     if mode.0 != FollowingType::Free {
+        mouse_motion.clear();
         return;
     }
 
-    let delta = time.delta_secs();
-    let mut camera_transform = camera_query.into_inner();
+    let dt = time.delta_secs();
+    let move_speed = 10.0;
+    let look_speed = 0.002;
 
-    let mut mouse_delta = Vec2::ZERO;
-    for event in mouse_motion_events.read() {
-        mouse_delta += event.delta;
-    }
+    for mut transform in camera_query.iter_mut() {
+        // 移动控制
+        let forward = transform.forward();
+        let right = transform.right();
 
-    if mouse_delta != Vec2::ZERO {
-        let (yaw, pitch, roll) = camera_transform.rotation.to_euler(EulerRot::YXZ);
+        if keyboard.pressed(KeyCode::KeyW) {
+            transform.translation += forward * move_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::KeyS) {
+            transform.translation -= forward * move_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::KeyD) {
+            transform.translation += right * move_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::KeyA) {
+            transform.translation -= right * move_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::Space) {
+            transform.translation += Vec3::Y * move_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::ShiftLeft) {
+            transform.translation -= Vec3::Y * move_speed * dt;
+        }
 
-        let new_yaw = yaw - mouse_delta.x * 0.003;
-        let new_pitch = (pitch - mouse_delta.y * 0.003).clamp(-1.4, 1.4);
-
-        camera_transform.rotation = Quat::from_euler(EulerRot::YXZ, new_yaw, new_pitch, roll);
-    }
-
-    const CAMERA_SPEED: f32 = 8.0;
-    let speed = CAMERA_SPEED * delta;
-    let forward = camera_transform.forward();
-    let right = camera_transform.right();
-    let up = camera_transform.up();
-
-    if keyboard.pressed(KeyCode::KeyW) {
-        camera_transform.translation += forward * speed;
-    }
-    if keyboard.pressed(KeyCode::KeyS) {
-        camera_transform.translation -= forward * speed;
-    }
-    if keyboard.pressed(KeyCode::KeyA) {
-        camera_transform.translation -= right * speed;
-    }
-    if keyboard.pressed(KeyCode::KeyD) {
-        camera_transform.translation += right * speed;
-    }
-    if keyboard.pressed(KeyCode::KeyN) {
-        camera_transform.translation += up * speed;
-    }
-    if keyboard.pressed(KeyCode::KeyJ) {
-        camera_transform.translation -= up * speed;
+        // 视角控制
+        for event in mouse_motion.read() {
+            let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+            yaw -= event.delta.x * look_speed;
+            pitch -= event.delta.y * look_speed;
+            pitch = pitch.clamp(-1.5, 1.5);
+            transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
+        }
     }
 }
 
-fn screenshot_on_f2(
-    mut commands: Commands,
-    input: Res<ButtonInput<KeyCode>>,
-    mut counter: Local<u32>,
-) {
-    if input.just_pressed(KeyCode::F2) {
-        let path = format!("./screenshot-{}.png", *counter);
-        *counter += 1;
+fn screenshot_on_f2(mut commands: Commands, keyboard: Res<ButtonInput<KeyCode>>) {
+    if keyboard.just_pressed(KeyCode::F2) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let path = format!("screenshot_{}.png", timestamp);
+
         commands
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(path));
+
+        info!(
+            "Screenshot saved to {}",
+            format!("screenshot_{}.png", timestamp)
+        );
     }
 }
 
-fn screenshot_saving(
-    mut commands: Commands,
-    screenshot_saving: Query<Entity, With<Capturing>>,
-    window: Single<Entity, With<Window>>,
+fn screenshot_saving(// mut commands: Commands,
+    // screenshots: Query<(Entity, &Screenshot, &Capturing)>,
 ) {
-    match screenshot_saving.iter().count() {
-        0 => {
-            commands.entity(*window).remove::<CursorIcon>();
-        }
-        x if x > 0 => {
-            commands
-                .entity(*window)
-                .insert(CursorIcon::from(SystemCursorIcon::Progress));
-        }
-        _ => {}
-    }
+    // for (entity, screenshot, capturing) in screenshots.iter() {
+    //     if capturing.is_capturing() {
+    //         continue;
+    //     }
+    //     let path = format!(
+    //         "screenshot_{}.png",
+    //         std::time::SystemTime::now()
+    //             .duration_since(std::time::UNIX_EPOCH)
+    //             .unwrap()
+    //             .as_millis()
+    //     );
+    //     if let Err(e) = save_to_disk(screenshot.clone(), &path) {
+    //         error!("Failed to save screenshot: {}", e);
+    //     } else {
+    //         info!("Screenshot saved to {}", path);
+    //     }
+    //     commands.entity(entity).remove::<Screenshot>();
+    // }
 }

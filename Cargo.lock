@@ -2222,6 +2222,7 @@ dependencies = [
  "avian3d",
  "bevy",
  "crossbeam-channel",
+ "futures-lite",
  "image",
  "r2r",
  "rand 0.9.2",
