@@ -205,11 +205,7 @@ define_topic!(OdomPoseTopic, PoseStamped, "/odom_pose");
 define_topic!(CameraPoseTopic, PoseStamped, "/camera_pose");
 
 // 云台四元数位姿发布
-define_topic!(
-    GimbalQuaternionTopic,
-    QuaternionStamped,
-    "/gimbal_quaternion"
-);
+define_topic!(GimbalQuaternionTopic, QuaternionStamped, "/ahrs_quaternion");
 
 // 弹丸速度发布 (使用 Float64)
 define_topic!(CurrentVelocityTopic, Float64, "/current_velocity");
