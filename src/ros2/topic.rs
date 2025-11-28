@@ -22,6 +22,37 @@ impl<T: RosTopic> TopicPublisher<T> {
     }
 }
 
+// ==================== Subscriber ====================
+
+#[derive(Resource)]
+pub struct TopicSubscriber<T: RosTopic> {
+    receiver: Arc<Mutex<Receiver<T::T>>>,
+}
+
+impl<T: RosTopic> TopicSubscriber<T> {
+    pub(crate) fn new(receiver: Receiver<T::T>) -> Self {
+        TopicSubscriber {
+            receiver: Arc::new(Mutex::new(receiver)),
+        }
+    }
+
+    pub fn try_recv(&self) -> Option<T::T> {
+        self.receiver.lock().ok()?.try_recv().ok()
+    }
+
+    /// 获取最新消息（丢弃旧消息）
+    pub fn get_latest(&self) -> Option<T::T> {
+        let receiver = self.receiver.lock().ok()?;
+        let mut latest = None;
+        while let Ok(msg) = receiver.try_recv() {
+            latest = Some(msg);
+        }
+        latest
+    }
+}
+
+// ==================== Publisher Macro ====================
+
 #[macro_export]
 macro_rules! publisher {
     ($node:ident,$topic:ty) => {
@@ -77,6 +108,69 @@ macro_rules! publisher {
         )*
     };
 }
+
+// ==================== Subscriber Macro ====================
+
+/// 创建一个 no-op Waker 用于非阻塞轮询 Stream
+pub fn noop_waker() -> ::std::task::Waker {
+    use ::std::task::{RawWaker, RawWakerVTable, Waker};
+
+    const VTABLE: RawWakerVTable = RawWakerVTable::new(
+        |_| RawWaker::new(::std::ptr::null(), &VTABLE),
+        |_| {},
+        |_| {},
+        |_| {},
+    );
+    unsafe { Waker::from_raw(RawWaker::new(::std::ptr::null(), &VTABLE)) }
+}
+
+#[macro_export]
+macro_rules! subscriber {
+    ($node:ident, $topic:ty) => {{
+        let (sender, receiver): (
+            ::std::sync::mpsc::SyncSender<<$topic as crate::ros2::topic::RosTopic>::T>,
+            ::std::sync::mpsc::Receiver<<$topic as crate::ros2::topic::RosTopic>::T>,
+        ) = ::std::sync::mpsc::sync_channel(64);
+
+        let subscription = $node
+            .subscribe::<<$topic as crate::ros2::topic::RosTopic>::T>(
+                <$topic>::TOPIC,
+                <$topic>::QOS,
+            )
+            .unwrap();
+
+        (sender, receiver, subscription)
+    }};
+
+    ($atomic:expr, $node:ident, $topic:ty) => {{
+        use ::std::pin::Pin;
+        use ::std::task::{Context, Poll};
+        use ::futures_lite::stream::StreamExt;
+
+        let atomic = $atomic.clone();
+        let (sender, receiver, mut subscription) = subscriber!($node, $topic);
+        ::std::thread::spawn(move || {
+            let waker = crate::ros2::topic::noop_waker();
+            let mut cx = Context::from_waker(&waker);
+
+            while !atomic.load(::std::sync::atomic::Ordering::Acquire) {
+                // 使用 poll_next 非阻塞地轮询 Stream
+                if let Poll::Ready(Some(msg)) = Pin::new(&mut subscription).poll_next(&mut cx) {
+                    let _ = sender.try_send(msg);
+                }
+                ::std::thread::sleep(::std::time::Duration::from_micros(100));
+            }
+        });
+        crate::ros2::topic::TopicSubscriber::<$topic>::new(receiver)
+    }};
+
+    ($atomic:expr, $app:ident, $node:ident, $($topic:ty),* $(,)?) => {
+        $(
+            $app.insert_resource(subscriber!($atomic, $node, $topic));
+        )*
+    };
+}
+
 
 pub trait RosTopic {
     type T: WrappedTypesupport + 'static;
