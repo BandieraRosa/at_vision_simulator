@@ -1,22 +1,22 @@
 use crate::ros2::capture::{CaptureConfig, RosCaptureContext, RosCapturePlugin};
 use crate::ros2::topic::*;
 use crate::{
-    arc_mutex, publisher,
+    InfantryGimbal, InfantryViewOffset, LocalInfantry, arc_mutex, publisher,
     robomaster::power_rune::{PowerRune, RuneIndex},
-    subscriber, InfantryGimbal, InfantryViewOffset, LocalInfantry,
+    subscriber,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
+use r2r::ClockType::SystemTime;
 use r2r::geometry_msgs::msg::{Pose, PoseStamped, QuaternionStamped};
 use r2r::std_msgs::msg::Float64;
-use r2r::ClockType::SystemTime;
-use r2r::{tf2_msgs::msg::TFMessage, Clock, Context, Node, std_msgs::msg::Header};
+use r2r::{Clock, Context, Node, std_msgs::msg::Header, tf2_msgs::msg::TFMessage};
 use std::f32::consts::PI;
 use std::time::Duration;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
 };
@@ -88,7 +88,7 @@ pub struct AutoAimMode {
 
 #[derive(Resource, Default, Clone)]
 pub struct TargetEuler {
-    pub yaw: f32,   // rad
+    pub yaw: f32, // rad
     pub pitch: f32,
     pub valid: bool,
 }
