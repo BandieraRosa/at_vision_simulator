@@ -227,6 +227,7 @@ fn capture_rune(
     camera_pose_pub: ResMut<TopicPublisher<CameraPoseTopic>>,
 ) {
     let cam_transform = camera.into_inner();
+    let gimbal_transform = gimbal.into_inner();
     let stamp = Clock::to_builtin_time(&res_unwrap!(clock).get_now().unwrap());
     let mut transform_stamped = vec![];
     let map_hdr = Header {
@@ -237,41 +238,74 @@ fn capture_rune(
         stamp: stamp.clone(),
         frame_id: "odom".to_string(),
     };
-    let gimbal_hdr = Header {
+    // change: add gimbal_odom
+    let gimbal_odom_hdr = Header {
         stamp: stamp.clone(),
-        frame_id: "gimbal_link".to_string(),
+        frame_id: "gimbal_odom".to_string(),
+    };
+    let yaw_link_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "yaw_link".to_string(),
+    };
+    let pitch_link_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "pitch_link".to_string(),
     };
     let camera_hdr = Header {
         stamp: stamp.clone(),
         frame_id: "camera_link".to_string(),
     };
 
-    gimbal_pose_pub.publish(pose!(gimbal_hdr));
+    gimbal_pose_pub.publish(pose!(gimbal_odom_hdr));
     odom_pose_pub.publish(pose!(odom_hdr));
     camera_pose_pub.publish(pose!(camera_hdr));
-
     add_tf_frame!(
         transform_stamped,
         map_hdr.clone(),
         "odom",
-        gimbal.translation(),
+        gimbal_transform.translation(),
         Quat::IDENTITY
     );
+    // change: add gimbal_odom frame
     add_tf_frame!(
         transform_stamped,
         odom_hdr.clone(),
-        "gimbal_link",
+        "gimbal_odom",
         Vec3::ZERO,
-        gimbal.rotation()
+        Quat::IDENTITY
     );
-    let cam_rel = cam_transform.reparented_to(gimbal.into_inner());
+    let gimbal_rotation = gimbal_transform.rotation();
+    let (yaw, pitch, _roll) = gimbal_rotation.to_euler(EulerRot::YXZ);
+
+    // add yaw_link
     add_tf_frame!(
         transform_stamped,
-        gimbal_hdr.clone(),
-        "camera_link",
-        cam_rel.translation,
-        cam_rel.rotation
+        gimbal_odom_hdr.clone(),
+        "yaw_link",
+        Vec3::ZERO,
+        Quat::from_rotation_y(yaw)
     );
+
+    // yaw_link -> pitch_link (-y轴)
+    add_tf_frame!(
+        transform_stamped,
+        yaw_link_hdr.clone(),
+        "pitch_link",
+        Vec3::ZERO,
+        Quat::from_rotation_x(pitch)  // 绕x轴旋转 pitch
+    );
+
+    // pitch_link -> camera_link
+    let cam = cam_transform.reparented_to(gimbal_transform);
+    add_tf_frame!(
+        transform_stamped,
+        pitch_link_hdr.clone(),
+        "camera_link",
+        cam.translation,
+        cam.rotation
+    );
+
+    // camera_link -> camera_optical_frame
     add_tf_frame!(
         transform_stamped,
         camera_hdr.clone(),
@@ -279,6 +313,27 @@ fn capture_rune(
         Vec3::ZERO,
         Quat::from_euler(EulerRot::ZYX, -PI / 2.0, PI, PI / 2.0)
     );
+
+    // 保留原有的 gimbal_link
+    let gimbal_hdr = Header {
+        stamp: stamp.clone(),
+        frame_id: "gimbal_link".to_string(),
+    };
+    add_tf_frame!(
+        transform_stamped,
+        odom_hdr.clone(),
+        "gimbal_link",
+        Vec3::ZERO,
+        gimbal_transform.rotation()
+    );
+    add_tf_frame!(
+        transform_stamped,
+        gimbal_hdr.clone(),
+        "camera_link",
+        cam.translation,
+        cam.rotation
+    );
+
     for (transform, rune) in runes {
         add_tf_frame!(
             transform_stamped,
